@@ -11,6 +11,7 @@ import {
   HeartPulse,
   Minus,
   Plus,
+  Star,
   X,
 } from 'lucide-react';
 import type { Item, RecipeDatabase } from '../types/recipes';
@@ -29,6 +30,7 @@ interface RecipeDetailDrawerProps {
   pantry: Record<string, number>;
   acquire?: Record<string, number>;
   quantityMode?: boolean;
+  isFavorite?: boolean;
   onClose: () => void;
   onTogglePantryItem: (itemId: string, requiredQty?: number) => void;
   onToggleAcquireItem?: (itemId: string, defaultQty?: number) => void;
@@ -36,6 +38,7 @@ interface RecipeDetailDrawerProps {
   onIncrementItem?: (id: string) => void;
   onDecrementItem?: (id: string) => void;
   onSetQuantity?: (id: string, qty: number) => void;
+  onToggleFavorite?: (recipeId: string) => void;
 }
 
 export function RecipeDetailDrawer({
@@ -44,6 +47,7 @@ export function RecipeDetailDrawer({
   pantry,
   acquire = {},
   quantityMode = false,
+  isFavorite = false,
   onClose,
   onTogglePantryItem,
   onToggleAcquireItem,
@@ -51,6 +55,7 @@ export function RecipeDetailDrawer({
   onIncrementItem,
   onDecrementItem,
   onSetQuantity,
+  onToggleFavorite,
 }: RecipeDetailDrawerProps) {
   const drawerRef = useRef<HTMLDivElement | null>(null);
   const [expandedDistillers, setExpandedDistillers] = useState<
@@ -287,19 +292,54 @@ export function RecipeDetailDrawer({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close recipe details"
-            className="surface-hover touch-target rounded border p-1.5 transition-colors"
-            style={{
-              backgroundColor: 'var(--bg-elevated)',
-              borderColor: 'var(--border-subtle)',
-              color: 'var(--text-secondary)',
-            }}
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {onToggleFavorite && (
+              <button
+                type="button"
+                aria-pressed={isFavorite}
+                aria-label={
+                  isFavorite
+                    ? `Remove ${recipe.name} from favourites`
+                    : `Add ${recipe.name} to favourites`
+                }
+                onClick={() => onToggleFavorite(recipe.id)}
+                className="surface-hover touch-chip pressable inline-flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-xs font-medium transition-colors"
+                style={{
+                  backgroundColor: isFavorite
+                    ? 'var(--accent-food-bg)'
+                    : 'var(--bg-elevated)',
+                  borderColor: isFavorite
+                    ? 'var(--accent-food-border)'
+                    : 'var(--border-subtle)',
+                  color: isFavorite
+                    ? 'var(--accent-food)'
+                    : 'var(--text-secondary)',
+                }}
+              >
+                <Star
+                  className="h-3.5 w-3.5 shrink-0"
+                  aria-hidden="true"
+                  fill={isFavorite ? 'currentColor' : 'none'}
+                />
+                <span className="hidden sm:inline">
+                  {isFavorite ? 'Favourited' : 'Favourite'}
+                </span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close recipe details"
+              className="surface-hover touch-target rounded border p-1.5 transition-colors"
+              style={{
+                backgroundColor: 'var(--bg-elevated)',
+                borderColor: 'var(--border-subtle)',
+                color: 'var(--text-secondary)',
+              }}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         {/* Scrollable Body */}

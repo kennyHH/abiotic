@@ -4,8 +4,10 @@ import {
   Beaker,
   Check,
   CheckCircle2,
+  ClipboardList,
   HeartPulse,
   Plus,
+  Star,
 } from 'lucide-react';
 import type { RecipeDatabase } from '../types/recipes';
 import type { CraftMatchResult } from '../lib/matcher';
@@ -17,8 +19,11 @@ interface RecipeTableProps {
   db: RecipeDatabase;
   hasPantryItems: boolean;
   quantityMode?: boolean;
+  acquire?: Record<string, number>;
+  favoriteIds?: ReadonlySet<string>;
   onSelectRecipe: (result: CraftMatchResult) => void;
-  onTogglePantryItem: (itemId: string, requiredQty?: number) => void;
+  onToggleAcquireItem: (itemId: string, defaultQty?: number) => void;
+  onToggleFavorite?: (recipeId: string) => void;
 }
 
 export function RecipeTable({
@@ -26,8 +31,11 @@ export function RecipeTable({
   db,
   hasPantryItems,
   quantityMode = false,
+  acquire,
+  favoriteIds,
   onSelectRecipe,
-  onTogglePantryItem,
+  onToggleAcquireItem,
+  onToggleFavorite,
 }: RecipeTableProps) {
   return (
     <div className="space-y-1.5">
@@ -113,6 +121,47 @@ export function RecipeTable({
                     }}
                   >
                     <div className="flex items-center gap-2.5">
+                      {onToggleFavorite && (() => {
+                        const isFav = Boolean(favoriteIds?.has(r.id));
+                        return (
+                          <button
+                            type="button"
+                            aria-pressed={isFav}
+                            aria-label={
+                              isFav
+                                ? `Remove ${r.name} from favourites`
+                                : `Add ${r.name} to favourites`
+                            }
+                            title={
+                              isFav
+                                ? 'Remove from favourites'
+                                : 'Add to favourites'
+                            }
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onToggleFavorite(r.id);
+                            }}
+                            className="surface-hover touch-target pressable inline-flex shrink-0 items-center justify-center rounded border transition-colors"
+                            style={{
+                              backgroundColor: isFav
+                                ? 'var(--accent-food-bg)'
+                                : 'var(--bg-well)',
+                              borderColor: isFav
+                                ? 'var(--accent-food-border)'
+                                : 'var(--border-subtle)',
+                              color: isFav
+                                ? 'var(--accent-food)'
+                                : 'var(--text-muted)',
+                            }}
+                          >
+                            <Star
+                              className="h-3.5 w-3.5"
+                              aria-hidden="true"
+                              fill={isFav ? 'currentColor' : 'none'}
+                            />
+                          </button>
+                        );
+                      })()}
                       <ItemImage
                         src={r.image}
                         fallbackKind={fallbackKind}
@@ -181,21 +230,25 @@ export function RecipeTable({
                         const isOwned = ing.status === 'owned';
                         const isDistill = ing.status === 'distillable';
                         const isPartial = ing.status === 'partial';
-                        const pillTitle = isOwned
-                          ? `Click to remove ${name}`
-                          : isPartial
-                            ? `Have ${have}/${ing.required} ${name} — click to set to ${ing.required}`
-                            : isDistill
-                              ? `Distillable ${name} (x${ing.required})`
-                              : `Click to add ${name}${quantityMode && ing.required > 1 ? ` (×${ing.required})` : ''}`;
+                        const acquireQty = acquire?.[ing.itemId] ?? 0;
+                        const inAcquire = acquireQty > 0;
+                        const defaultAcquireQty =
+                          quantityMode && (ing.status === 'missing' || isPartial)
+                            ? Math.max(1, ing.missingQty)
+                            : Math.max(1, ing.required);
+                        const pillTitle = inAcquire
+                          ? `On To Acquire list (×${acquireQty}) — click to remove`
+                          : hasPantryItems && isPartial
+                            ? `Have ${have}/${ing.required} ${name} — click to add ${defaultAcquireQty} to To Acquire`
+                            : `Click to add ${name}${defaultAcquireQty > 1 ? ` (×${defaultAcquireQty})` : ''} to To Acquire`;
                         return (
                           <button
                             key={`${ing.itemId}-${idx}`}
                             type="button"
-                            aria-pressed={isOwned}
+                            aria-pressed={inAcquire}
                             onClick={(e) => {
                               e.stopPropagation();
-                              onTogglePantryItem(ing.itemId, ing.required);
+                              onToggleAcquireItem(ing.itemId, defaultAcquireQty);
                             }}
                             title={pillTitle}
                             className="surface-hover inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-xs transition-colors"
@@ -203,36 +256,60 @@ export function RecipeTable({
                               backgroundColor:
                                 hasPantryItems && isOwned
                                   ? 'var(--accent-ready-bg)'
-                                  : hasPantryItems && isPartial
-                                    ? 'var(--accent-food-bg)'
-                                    : hasPantryItems && isDistill
-                                      ? 'var(--accent-chem-bg)'
+                                  : hasPantryItems && isDistill
+                                    ? 'var(--accent-chem-bg)'
+                                    : inAcquire || (hasPantryItems && isPartial)
+                                      ? 'var(--accent-food-bg)'
                                       : 'var(--bg-ground)',
                               borderColor:
                                 hasPantryItems && isOwned
                                   ? 'var(--accent-ready-border)'
-                                  : hasPantryItems && isPartial
-                                    ? 'var(--accent-food-border)'
-                                    : hasPantryItems && isDistill
-                                      ? 'var(--accent-chem-border)'
+                                  : hasPantryItems && isDistill
+                                    ? 'var(--accent-chem-border)'
+                                    : inAcquire || (hasPantryItems && isPartial)
+                                      ? 'var(--accent-food-border)'
                                       : 'var(--border-subtle)',
                               color:
-                                hasPantryItems && isPartial
+                                inAcquire || (hasPantryItems && isPartial)
                                   ? 'var(--accent-food)'
                                   : 'var(--text-primary)',
                             }}
                           >
                             {hasPantryItems && isOwned ? (
-                              <Check
-                                className="h-3 w-3 shrink-0"
-                                aria-hidden="true"
-                                style={{ color: 'var(--accent-ready)' }}
-                              />
+                              <>
+                                <Check
+                                  className="h-3 w-3 shrink-0"
+                                  aria-hidden="true"
+                                  style={{ color: 'var(--accent-ready)' }}
+                                />
+                                {inAcquire && (
+                                  <ClipboardList
+                                    className="h-3 w-3 shrink-0"
+                                    aria-hidden="true"
+                                    style={{ color: 'var(--accent-food)' }}
+                                  />
+                                )}
+                              </>
                             ) : hasPantryItems && isDistill ? (
-                              <Beaker
+                              <>
+                                <Beaker
+                                  className="h-3 w-3 shrink-0"
+                                  aria-hidden="true"
+                                  style={{ color: 'var(--accent-chem)' }}
+                                />
+                                {inAcquire && (
+                                  <ClipboardList
+                                    className="h-3 w-3 shrink-0"
+                                    aria-hidden="true"
+                                    style={{ color: 'var(--accent-food)' }}
+                                  />
+                                )}
+                              </>
+                            ) : inAcquire ? (
+                              <ClipboardList
                                 className="h-3 w-3 shrink-0"
                                 aria-hidden="true"
-                                style={{ color: 'var(--accent-chem)' }}
+                                style={{ color: 'var(--accent-food)' }}
                               />
                             ) : (
                               <Plus

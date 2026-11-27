@@ -6,6 +6,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
+  Star,
 } from 'lucide-react';
 import type { RecipeSubcategory } from '../types/recipes';
 import type { ActiveTab } from './TopBar';
@@ -23,6 +24,9 @@ interface FilterBarProps {
   onHideUnsafeSoupsChange: (val: boolean) => void;
   onlyBuffed: boolean;
   onOnlyBuffedChange: (val: boolean) => void;
+  onlyFavorites?: boolean;
+  onOnlyFavoritesChange?: (val: boolean) => void;
+  favoriteCount?: number;
   hasPantryItems?: boolean;
   hasActiveFilters?: boolean;
   onResetFilters?: () => void;
@@ -43,6 +47,9 @@ export function FilterBar({
   onHideUnsafeSoupsChange,
   onlyBuffed,
   onOnlyBuffedChange,
+  onlyFavorites = false,
+  onOnlyFavoritesChange,
+  favoriteCount = 0,
   hasPantryItems = false,
   hasActiveFilters = false,
   onResetFilters,
@@ -95,11 +102,18 @@ export function FilterBar({
     [defaultSortLabel]
   );
 
+  const showWorkstations =
+    (activeTab === 'all' || activeTab === 'favorites') &&
+    availableWorkstations.length > 1;
+  const showUnsafeToggle =
+    activeTab === 'all' || activeTab === 'soup' || activeTab === 'favorites';
+
   const activeFilterCount =
     (workstation !== 'all' ? 1 : 0) +
     (subcategory !== 'all' ? 1 : 0) +
     (onlyBuffed ? 1 : 0) +
-    (!hideUnsafeSoups && (activeTab === 'all' || activeTab === 'soup') ? 1 : 0);
+    (activeTab !== 'favorites' && onlyFavorites ? 1 : 0) +
+    (!hideUnsafeSoups && showUnsafeToggle ? 1 : 0);
 
   return (
     <div
@@ -176,7 +190,7 @@ export function FilterBar({
           </div>
         )}
 
-        {activeTab === 'all' && availableWorkstations.length > 1 && (
+        {showWorkstations && (
           <CustomSelect
             value={workstation}
             options={stationOptions}
@@ -211,7 +225,52 @@ export function FilterBar({
           <span>Has Buff</span>
         </button>
 
-        {(activeTab === 'all' || activeTab === 'soup') && (
+        {activeTab !== 'favorites' && onOnlyFavoritesChange && (
+          <button
+            type="button"
+            aria-pressed={onlyFavorites}
+            onClick={() => onOnlyFavoritesChange(!onlyFavorites)}
+            className="surface-hover touch-chip pressable flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-[13px] font-medium transition-colors"
+            style={{
+              backgroundColor: onlyFavorites
+                ? 'var(--accent-food-bg)'
+                : 'transparent',
+              borderColor: onlyFavorites
+                ? 'var(--accent-food-border)'
+                : 'var(--border-subtle)',
+              color: onlyFavorites
+                ? 'var(--accent-food)'
+                : 'var(--text-secondary)',
+            }}
+          >
+            <Star
+              className="h-3.5 w-3.5"
+              aria-hidden="true"
+              fill={onlyFavorites ? 'currentColor' : 'none'}
+              style={{
+                color: onlyFavorites ? 'var(--accent-food)' : 'var(--text-muted)',
+              }}
+            />
+            <span>Favourites</span>
+            {favoriteCount > 0 && (
+              <span
+                className="font-readout rounded px-1.5 py-0.5 text-xs font-semibold leading-none"
+                style={{
+                  backgroundColor: onlyFavorites
+                    ? 'var(--bg-surface)'
+                    : 'var(--bg-well)',
+                  color: onlyFavorites
+                    ? 'var(--accent-food)'
+                    : 'var(--text-muted)',
+                }}
+              >
+                {favoriteCount}
+              </span>
+            )}
+          </button>
+        )}
+
+        {showUnsafeToggle && (
           <button
             type="button"
             aria-pressed={hideUnsafeSoups}

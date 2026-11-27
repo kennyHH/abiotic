@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import {
+  ArrowLeftRight,
   Backpack,
   Beaker,
   ClipboardList,
@@ -10,6 +11,7 @@ import {
   Moon,
   Search,
   Soup,
+  Star,
   Sun,
   Table2,
   X,
@@ -18,7 +20,12 @@ import type { RecipeCategory } from '../types/recipes';
 import type { ThemeMode } from '../hooks/usePantry';
 import { InfoPopover } from './UiControls';
 
-export type ActiveTab = 'all' | RecipeCategory | 'distillations';
+export type ActiveTab =
+  | 'all'
+  | RecipeCategory
+  | 'distillations'
+  | 'favorites'
+  | 'pantry';
 export type ViewMode = 'cards' | 'table';
 
 interface TopBarProps {
@@ -35,6 +42,7 @@ interface TopBarProps {
   desktopPantryCollapsed?: boolean;
   onExpandDesktopPantry?: () => void;
   onExpandDesktopAcquire?: () => void;
+  onOpenExportImport?: () => void;
   selectedPantryCount?: number;
   acquireCount?: number;
 }
@@ -64,6 +72,7 @@ export function TopBar({
   desktopPantryCollapsed = false,
   onExpandDesktopPantry,
   onExpandDesktopAcquire,
+  onOpenExportImport,
   selectedPantryCount = 0,
   acquireCount = 0,
 }: TopBarProps) {
@@ -72,6 +81,7 @@ export function TopBar({
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   useEffect(() => {
+    if (activeTab === 'pantry') return;
     const onGlobalKeyDown = (e: KeyboardEvent) => {
       if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
       const target = e.target as HTMLElement | null;
@@ -89,7 +99,7 @@ export function TopBar({
     };
     window.addEventListener('keydown', onGlobalKeyDown);
     return () => window.removeEventListener('keydown', onGlobalKeyDown);
-  }, []);
+  }, [activeTab]);
 
   const tabs: {
     id: ActiveTab;
@@ -132,6 +142,18 @@ export function TopBar({
       hideSuffixOnTablet: true,
       icon: Beaker,
       accentVar: 'var(--accent-chem)',
+    },
+    {
+      id: 'favorites',
+      label: 'Favourites',
+      icon: Star,
+      accentVar: 'var(--accent-food)',
+    },
+    {
+      id: 'pantry',
+      label: 'Pantry',
+      icon: Backpack,
+      accentVar: 'var(--accent-ready)',
     },
   ];
 
@@ -279,54 +301,56 @@ export function TopBar({
             )}
 
             {/* Search input */}
-            <div className="relative flex-1">
-              <Search
-                aria-hidden="true"
-                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
-                style={{ color: 'var(--text-muted)' }}
-              />
-              <input
-                ref={searchInputRef}
-                type="search"
-                value={search}
-                onChange={(e) => onSearchChange(e.target.value)}
-                placeholder="Search recipes & buffs..."
-                aria-label="Search recipes, ingredients, or buffs"
-                className="w-full rounded border py-1.5 pl-9 pr-10 text-base transition-colors sm:text-sm"
-                style={{
-                  backgroundColor: 'var(--bg-well)',
-                  borderColor: 'var(--border-subtle)',
-                  boxShadow: 'var(--inset-well)',
-                  color: 'var(--text-primary)',
-                }}
-              />
-              {!search ? (
-                <kbd
+            {activeTab !== 'pantry' && (
+              <div className="relative flex-1">
+                <Search
                   aria-hidden="true"
-                  className="font-code pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 rounded border px-1.5 py-0.5 text-xs font-medium sm:inline-flex"
-                  style={{
-                    backgroundColor: 'var(--bg-surface)',
-                    borderColor: 'var(--border-subtle)',
-                    color: 'var(--text-muted)',
-                  }}
-                >
-                  /
-                </kbd>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => onSearchChange('')}
-                  aria-label="Clear search"
-                  className="touch-target absolute right-1 top-1/2 inline-flex -translate-y-1/2 items-center justify-center rounded hover:opacity-80"
+                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
                   style={{ color: 'var(--text-muted)' }}
-                >
-                  <X className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
-              )}
-            </div>
+                />
+                <input
+                  ref={searchInputRef}
+                  type="search"
+                  value={search}
+                  onChange={(e) => onSearchChange(e.target.value)}
+                  placeholder="Search recipes & buffs..."
+                  aria-label="Search recipes, ingredients, or buffs"
+                  className="w-full rounded border py-1.5 pl-9 pr-10 text-base transition-colors sm:text-sm"
+                  style={{
+                    backgroundColor: 'var(--bg-well)',
+                    borderColor: 'var(--border-subtle)',
+                    boxShadow: 'var(--inset-well)',
+                    color: 'var(--text-primary)',
+                  }}
+                />
+                {!search ? (
+                  <kbd
+                    aria-hidden="true"
+                    className="font-code pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 rounded border px-1.5 py-0.5 text-xs font-medium sm:inline-flex"
+                    style={{
+                      backgroundColor: 'var(--bg-surface)',
+                      borderColor: 'var(--border-subtle)',
+                      color: 'var(--text-muted)',
+                    }}
+                  >
+                    /
+                  </kbd>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onSearchChange('')}
+                    aria-label="Clear search"
+                    className="touch-target absolute right-1 top-1/2 inline-flex -translate-y-1/2 items-center justify-center rounded hover:opacity-80"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    <X className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Card / Table toggle */}
-            {activeTab !== 'distillations' && (
+            {activeTab !== 'distillations' && activeTab !== 'pantry' && (
               <div
                 className="hidden items-center rounded-md border p-0.5 sm:flex"
                 style={{
@@ -390,6 +414,24 @@ export function TopBar({
               </div>
             )}
 
+            {/* Export / Import */}
+            {onOpenExportImport && (
+              <button
+                type="button"
+                onClick={onOpenExportImport}
+                aria-label="Export or import pantry and favourites"
+                title="Export / Import Pantry & Favourites"
+                className="surface-hover touch-target flex h-9 w-9 shrink-0 items-center justify-center rounded border transition-colors"
+                style={{
+                  backgroundColor: 'var(--bg-well)',
+                  borderColor: 'var(--border-subtle)',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                <ArrowLeftRight className="h-4 w-4" aria-hidden="true" />
+              </button>
+            )}
+
             {/* About / Shortcuts Popover */}
             <InfoPopover
               ariaLabel="About and keyboard shortcuts"
@@ -407,7 +449,8 @@ export function TopBar({
                   </div>
                   <p className="mt-1">
                     Synced {syncedDate} from abioticfactor.wiki.gg. Tap any
-                    ingredient chip on a card to track Pantry inventory.
+                    ingredient chip on a recipe to add it to your To Acquire
+                    list.
                   </p>
                 </div>
                 <div

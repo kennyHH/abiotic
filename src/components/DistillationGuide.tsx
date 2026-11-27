@@ -69,6 +69,7 @@ export function DistillationGuide({
       })
       .filter((entry) => {
         if (!entry.distItem) return false;
+        if (entry.sources.length === 0 && entry.usedIn.length === 0) return false;
         if (!q) return true;
         if (entry.distItem.name.toLowerCase().includes(q)) return true;
         if (entry.sources.some((s) => s.item.name.toLowerCase().includes(q))) {

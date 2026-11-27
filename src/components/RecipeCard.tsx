@@ -5,12 +5,14 @@ import {
   Beaker,
   Check,
   CheckCircle2,
+  ClipboardList,
   Clock,
   Droplets,
   HeartPulse,
   Layers,
   Plus,
   Radiation,
+  Star,
   Utensils,
   Zap,
 } from 'lucide-react';
@@ -28,9 +30,12 @@ interface RecipeCardProps {
   db: RecipeDatabase;
   hasPantryItems: boolean;
   quantityMode: boolean;
+  acquire?: Record<string, number>;
+  isFavorite?: boolean;
   eager?: boolean;
   onSelectRecipe: (result: CraftMatchResult) => void;
-  onTogglePantryItem: (itemId: string, requiredQty?: number) => void;
+  onToggleAcquireItem: (itemId: string, defaultQty?: number) => void;
+  onToggleFavorite?: (recipeId: string) => void;
 }
 
 function areRecipeCardPropsEqual(
@@ -40,10 +45,12 @@ function areRecipeCardPropsEqual(
   if (
     prev.hasPantryItems !== next.hasPantryItems ||
     prev.quantityMode !== next.quantityMode ||
+    Boolean(prev.isFavorite) !== Boolean(next.isFavorite) ||
     Boolean(prev.eager) !== Boolean(next.eager) ||
     prev.db !== next.db ||
     prev.onSelectRecipe !== next.onSelectRecipe ||
-    prev.onTogglePantryItem !== next.onTogglePantryItem
+    prev.onToggleAcquireItem !== next.onToggleAcquireItem ||
+    prev.onToggleFavorite !== next.onToggleFavorite
   ) {
     return false;
   }
@@ -69,7 +76,8 @@ function areRecipeCardPropsEqual(
       ia.fulfilledViaDistillation !== ib.fulfilledViaDistillation ||
       ia.missingQty !== ib.missingQty ||
       ia.distillationSteps.length !== ib.distillationSteps.length ||
-      ia.distillationSteps[0]?.rawItemId !== ib.distillationSteps[0]?.rawItemId
+      ia.distillationSteps[0]?.rawItemId !== ib.distillationSteps[0]?.rawItemId ||
+      (prev.acquire?.[ia.itemId] ?? 0) !== (next.acquire?.[ib.itemId] ?? 0)
     ) {
       return false;
     }
@@ -82,9 +90,12 @@ export const RecipeCard = memo(function RecipeCard({
   db,
   hasPantryItems,
   quantityMode,
+  acquire,
+  isFavorite = false,
   eager = false,
   onSelectRecipe,
-  onTogglePantryItem,
+  onToggleAcquireItem,
+  onToggleFavorite,
 }: RecipeCardProps) {
   const { recipe, status, craftMethod, missingDistinctCount, ingredientStatuses } =
     result;
@@ -196,55 +207,94 @@ export const RecipeCard = memo(function RecipeCard({
               </button>
             </h3>
 
-            {hasPantryItems && status === 'craftable' && (
-              <span
-                title={
-                  craftMethod === 'via-distillation'
-                    ? 'Craftable by distilling raw items in your Pantry'
-                    : undefined
-                }
-                className="flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 text-xs font-semibold"
-                style={{
-                  backgroundColor:
+            <div className="flex shrink-0 items-center gap-1.5">
+              {hasPantryItems && status === 'craftable' && (
+                <span
+                  title={
                     craftMethod === 'via-distillation'
-                      ? 'var(--accent-chem-bg)'
-                      : 'var(--accent-ready-bg)',
-                  borderColor:
-                    craftMethod === 'via-distillation'
-                      ? 'var(--accent-chem-border)'
-                      : 'var(--accent-ready-border)',
-                  color:
-                    craftMethod === 'via-distillation'
-                      ? 'var(--accent-chem)'
-                      : 'var(--accent-ready)',
-                }}
-              >
-                {craftMethod === 'via-distillation' ? (
-                  <>
-                    <Beaker className="h-3 w-3" aria-hidden="true" />
-                    Via Distill
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
-                    Ready
-                  </>
-                )}
-              </span>
-            )}
+                      ? 'Craftable by distilling raw items in your Pantry'
+                      : undefined
+                  }
+                  className="flex shrink-0 items-center gap-1 rounded border px-2 py-0.5 text-xs font-semibold"
+                  style={{
+                    backgroundColor:
+                      craftMethod === 'via-distillation'
+                        ? 'var(--accent-chem-bg)'
+                        : 'var(--accent-ready-bg)',
+                    borderColor:
+                      craftMethod === 'via-distillation'
+                        ? 'var(--accent-chem-border)'
+                        : 'var(--accent-ready-border)',
+                    color:
+                      craftMethod === 'via-distillation'
+                        ? 'var(--accent-chem)'
+                        : 'var(--accent-ready)',
+                  }}
+                >
+                  {craftMethod === 'via-distillation' ? (
+                    <>
+                      <Beaker className="h-3 w-3" aria-hidden="true" />
+                      Via Distill
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+                      Ready
+                    </>
+                  )}
+                </span>
+              )}
 
-            {hasPantryItems && status === 'almost' && (
-              <span
-                className="font-readout shrink-0 rounded border px-2 py-0.5 text-xs font-semibold"
-                style={{
-                  backgroundColor: 'var(--accent-food-bg)',
-                  borderColor: 'var(--accent-food-border)',
-                  color: 'var(--accent-food)',
-                }}
-              >
-                Missing {missingDistinctCount}
-              </span>
-            )}
+              {hasPantryItems && status === 'almost' && (
+                <span
+                  className="font-readout shrink-0 rounded border px-2 py-0.5 text-xs font-semibold"
+                  style={{
+                    backgroundColor: 'var(--accent-food-bg)',
+                    borderColor: 'var(--accent-food-border)',
+                    color: 'var(--accent-food)',
+                  }}
+                >
+                  Missing {missingDistinctCount}
+                </span>
+              )}
+
+              {onToggleFavorite && (
+                <button
+                  type="button"
+                  aria-pressed={isFavorite}
+                  aria-label={
+                    isFavorite
+                      ? `Remove ${recipe.name} from favourites`
+                      : `Add ${recipe.name} to favourites`
+                  }
+                  title={
+                    isFavorite ? 'Remove from favourites' : 'Add to favourites'
+                  }
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleFavorite(recipe.id);
+                  }}
+                  className="surface-hover touch-target pressable pointer-events-auto relative z-10 inline-flex items-center justify-center rounded border transition-colors"
+                  style={{
+                    backgroundColor: isFavorite
+                      ? 'var(--accent-food-bg)'
+                      : 'var(--bg-well)',
+                    borderColor: isFavorite
+                      ? 'var(--accent-food-border)'
+                      : 'var(--border-subtle)',
+                    color: isFavorite
+                      ? 'var(--accent-food)'
+                      : 'var(--text-muted)',
+                  }}
+                >
+                  <Star
+                    className="h-3.5 w-3.5"
+                    aria-hidden="true"
+                    fill={isFavorite ? 'currentColor' : 'none'}
+                  />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Quiet metadata line */}
@@ -534,14 +584,21 @@ export const RecipeCard = memo(function RecipeCard({
               const isDistill = ing.status === 'distillable';
               const isPartial = ing.status === 'partial';
               const have = ing.haveDirect + ing.fulfilledViaDistillation;
-              const slotHighlighted =
+              const acquireQty = acquire?.[ing.itemId] ?? 0;
+              const inAcquire = acquireQty > 0;
+              const defaultAcquireQty =
+                quantityMode && (ing.status === 'missing' || isPartial)
+                  ? Math.max(1, ing.missingQty)
+                  : Math.max(1, ing.required);
+              const pantryHighlighted =
                 hasPantryItems && (isOwned || isDistill || isPartial);
+              const slotHighlighted = pantryHighlighted || inAcquire;
               const borderColor =
                 hasPantryItems && isOwned
                   ? 'var(--accent-ready-border)'
                   : hasPantryItems && isDistill
                     ? 'var(--accent-chem-border)'
-                    : hasPantryItems && isPartial
+                    : inAcquire || (hasPantryItems && isPartial)
                       ? 'var(--accent-food-border)'
                       : 'var(--border-subtle)';
               const bgColor =
@@ -549,7 +606,7 @@ export const RecipeCard = memo(function RecipeCard({
                   ? 'var(--accent-ready-bg)'
                   : hasPantryItems && isDistill
                     ? 'var(--accent-chem-bg)'
-                    : hasPantryItems && isPartial
+                    : inAcquire || (hasPantryItems && isPartial)
                       ? 'var(--accent-food-bg)'
                       : 'var(--bg-well)';
               const statusAccent =
@@ -557,7 +614,7 @@ export const RecipeCard = memo(function RecipeCard({
                   ? 'var(--accent-ready)'
                   : hasPantryItems && isDistill
                     ? 'var(--accent-chem)'
-                    : hasPantryItems && isPartial
+                    : inAcquire || (hasPantryItems && isPartial)
                       ? 'var(--accent-food)'
                       : 'var(--text-primary)';
               const bottomBarColor = slotHighlighted
@@ -566,19 +623,20 @@ export const RecipeCard = memo(function RecipeCard({
 
               const itemName = item?.name || ing.itemId;
               const shortName = itemName.replace(/\s+Distillation$/i, '');
-              const slotTitle =
-                hasPantryItems && isPartial
-                  ? `Have ${have}/${ing.required} ${itemName} — click to set to ${ing.required}`
-                  : `${itemName} x${ing.required} (click to toggle in pantry)`;
+              const slotTitle = inAcquire
+                ? `On To Acquire list (×${acquireQty}) — click to remove`
+                : hasPantryItems && isPartial
+                  ? `Have ${have}/${ing.required} ${itemName} — click to add ${defaultAcquireQty} to To Acquire`
+                  : `Click to add ${itemName}${defaultAcquireQty > 1 ? ` (×${defaultAcquireQty})` : ''} to To Acquire`;
 
               return (
                 <button
                   key={`${ing.itemId}-${idx}`}
                   type="button"
-                  aria-pressed={isOwned}
+                  aria-pressed={inAcquire}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onTogglePantryItem(ing.itemId, ing.required);
+                    onToggleAcquireItem(ing.itemId, defaultAcquireQty);
                   }}
                   title={slotTitle}
                   className="surface-hover pressable pointer-events-auto relative z-10 flex flex-col items-center gap-1 overflow-hidden rounded border px-1.5 pt-1.5 pb-2 text-center"
@@ -596,10 +654,33 @@ export const RecipeCard = memo(function RecipeCard({
                       className="inline-flex items-center gap-0.5"
                       style={{ color: statusAccent }}
                     >
-                      {isOwned ? (
-                        <Check className="h-3 w-3 shrink-0" aria-hidden="true" />
-                      ) : isDistill ? (
-                        <Beaker className="h-3 w-3 shrink-0" aria-hidden="true" />
+                      {hasPantryItems && isOwned ? (
+                        <>
+                          <Check className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          {inAcquire && (
+                            <ClipboardList
+                              className="h-3 w-3 shrink-0"
+                              aria-hidden="true"
+                              style={{ color: 'var(--accent-food)' }}
+                            />
+                          )}
+                        </>
+                      ) : hasPantryItems && isDistill ? (
+                        <>
+                          <Beaker className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          {inAcquire && (
+                            <ClipboardList
+                              className="h-3 w-3 shrink-0"
+                              aria-hidden="true"
+                              style={{ color: 'var(--accent-food)' }}
+                            />
+                          )}
+                        </>
+                      ) : inAcquire ? (
+                        <ClipboardList
+                          className="h-3 w-3 shrink-0"
+                          aria-hidden="true"
+                        />
                       ) : (
                         <Plus className="h-3 w-3 shrink-0" aria-hidden="true" />
                       )}
@@ -661,14 +742,21 @@ export const RecipeCard = memo(function RecipeCard({
                 const isDistill = ing.status === 'distillable';
                 const isPartial = ing.status === 'partial';
                 const have = ing.haveDirect + ing.fulfilledViaDistillation;
+                const acquireQty = acquire?.[ing.itemId] ?? 0;
+                const inAcquire = acquireQty > 0;
+                const defaultAcquireQty =
+                  quantityMode && (ing.status === 'missing' || isPartial)
+                    ? Math.max(1, ing.missingQty)
+                    : Math.max(1, ing.required);
                 const highlighted =
-                  hasPantryItems && (isOwned || isDistill || isPartial);
+                  inAcquire ||
+                  (hasPantryItems && (isOwned || isDistill || isPartial));
                 const bgColor =
                   hasPantryItems && isOwned
                     ? 'var(--accent-ready-bg)'
                     : hasPantryItems && isDistill
                       ? 'var(--accent-chem-bg)'
-                      : hasPantryItems && isPartial
+                      : inAcquire || (hasPantryItems && isPartial)
                         ? 'var(--accent-food-bg)'
                         : 'var(--bg-well)';
                 const borderColor =
@@ -676,7 +764,7 @@ export const RecipeCard = memo(function RecipeCard({
                     ? 'var(--accent-ready-border)'
                     : hasPantryItems && isDistill
                       ? 'var(--accent-chem-border)'
-                      : hasPantryItems && isPartial
+                      : inAcquire || (hasPantryItems && isPartial)
                         ? 'var(--accent-food-border)'
                         : 'var(--border-subtle)';
                 const textColor =
@@ -684,22 +772,23 @@ export const RecipeCard = memo(function RecipeCard({
                     ? 'var(--accent-ready)'
                     : hasPantryItems && isDistill
                       ? 'var(--accent-chem)'
-                      : hasPantryItems && isPartial
+                      : inAcquire || (hasPantryItems && isPartial)
                         ? 'var(--accent-food)'
                         : 'var(--text-secondary)';
-                const pillTitle =
-                  hasPantryItems && isPartial
-                    ? `Have ${have}/${ing.required} ${itemName} — click to set to ${ing.required}`
-                    : `Click to ${isOwned ? 'remove' : 'add'} ${itemName}`;
+                const pillTitle = inAcquire
+                  ? `On To Acquire list (×${acquireQty}) — click to remove`
+                  : hasPantryItems && isPartial
+                    ? `Have ${have}/${ing.required} ${itemName} — click to add ${defaultAcquireQty} to To Acquire`
+                    : `Click to add ${itemName}${defaultAcquireQty > 1 ? ` (×${defaultAcquireQty})` : ''} to To Acquire`;
 
                 return (
                   <button
                     key={`${ing.itemId}-${idx}`}
                     type="button"
-                    aria-pressed={isOwned}
+                    aria-pressed={inAcquire}
                     onClick={(e) => {
                       e.stopPropagation();
-                      onTogglePantryItem(ing.itemId, ing.required);
+                      onToggleAcquireItem(ing.itemId, defaultAcquireQty);
                     }}
                     title={pillTitle}
                     className="surface-hover touch-chip pressable pointer-events-auto relative z-10 flex items-center gap-1.5 rounded border px-2 py-1 text-xs font-medium"
@@ -710,10 +799,33 @@ export const RecipeCard = memo(function RecipeCard({
                       color: textColor,
                     }}
                   >
-                    {isOwned ? (
-                      <Check className="h-3 w-3 shrink-0" aria-hidden="true" />
-                    ) : isDistill ? (
-                      <Beaker className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    {hasPantryItems && isOwned ? (
+                      <>
+                        <Check className="h-3 w-3 shrink-0" aria-hidden="true" />
+                        {inAcquire && (
+                          <ClipboardList
+                            className="h-3 w-3 shrink-0"
+                            aria-hidden="true"
+                            style={{ color: 'var(--accent-food)' }}
+                          />
+                        )}
+                      </>
+                    ) : hasPantryItems && isDistill ? (
+                      <>
+                        <Beaker className="h-3 w-3 shrink-0" aria-hidden="true" />
+                        {inAcquire && (
+                          <ClipboardList
+                            className="h-3 w-3 shrink-0"
+                            aria-hidden="true"
+                            style={{ color: 'var(--accent-food)' }}
+                          />
+                        )}
+                      </>
+                    ) : inAcquire ? (
+                      <ClipboardList
+                        className="h-3 w-3 shrink-0"
+                        aria-hidden="true"
+                      />
                     ) : (
                       <Plus className="h-3 w-3 shrink-0 opacity-70" aria-hidden="true" />
                     )}

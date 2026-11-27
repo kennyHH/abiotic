@@ -913,6 +913,8 @@ async function main() {
       .each((__, tr) => {
         const td = $chem(tr).find('td').first();
         if (!td.length) return;
+        const slots = td.find('.af-item-slot');
+        if (slots.length === 0) return;
         const distInfo = extractPrimaryItem($chem, td);
         if (!distInfo) return;
         const distItem = registerItem(distInfo.title, {
@@ -926,7 +928,7 @@ async function main() {
         }
 
         // Parse each .af-item-slot for raw item + amount produced
-        td.find('.af-item-slot').each((___, slot) => {
+        slots.each((___, slot) => {
           const link = $chem(slot).find('a[href^="/wiki/"]').first();
           const rawTitle = cleanText(link.attr('title') || $chem(slot).find('img').attr('alt'));
           if (!rawTitle) return;

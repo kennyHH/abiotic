@@ -1,11 +1,13 @@
 import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowLeftRight,
   Backpack,
   Beaker,
   Check,
   ChevronDown,
   ChevronUp,
   ClipboardList,
+  LayoutGrid,
   Minus,
   Package,
   PanelLeftClose,
@@ -15,78 +17,16 @@ import {
   X,
 } from 'lucide-react';
 import type { Item, RecipeDatabase } from '../types/recipes';
-import type { PantryDistillationSummary } from '../lib/matcher';
+import {
+  getPantryCatalog,
+  type PantryCatalogEntry,
+  type PantryDistillationSummary,
+} from '../lib/matcher';
 import type { CustomAcquireItem, LastAcquiredItem } from '../hooks/usePantry';
 import { ItemImage } from './ItemImage';
-import { InfoPopover, ToggleSwitch } from './UiControls';
+import { InfoPopover, QuantityInput, ToggleSwitch } from './UiControls';
 
 export type SidebarView = 'pantry' | 'acquire';
-
-interface QuantityInputProps {
-  value: number;
-  itemName: string;
-  ariaLabel?: string;
-  onCommit: (nextQty: number) => void;
-}
-
-function QuantityInput({
-  value,
-  itemName,
-  ariaLabel,
-  onCommit,
-}: QuantityInputProps) {
-  const [draft, setDraft] = useState(String(value));
-  const [editing, setEditing] = useState(false);
-
-  useEffect(() => {
-    if (!editing) {
-      setDraft(String(value));
-    }
-  }, [value, editing]);
-
-  const commitDraft = () => {
-    setEditing(false);
-    const parsed = parseInt(draft.replace(/[^0-9]/g, ''), 10);
-    if (!Number.isFinite(parsed) || parsed < 1) {
-      setDraft('1');
-      onCommit(1);
-      return;
-    }
-    const clamped = Math.min(999, parsed);
-    setDraft(String(clamped));
-    onCommit(clamped);
-  };
-
-  return (
-    <input
-      type="text"
-      inputMode="numeric"
-      pattern="[0-9]*"
-      value={editing ? draft : String(value)}
-      onFocus={() => {
-        setEditing(true);
-        setDraft(String(value));
-      }}
-      onChange={(e) => {
-        const digitsOnly = e.target.value.replace(/[^0-9]/g, '').slice(0, 3);
-        setDraft(digitsOnly);
-      }}
-      onBlur={commitDraft}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') {
-          e.currentTarget.blur();
-        } else if (e.key === 'Escape') {
-          setEditing(false);
-          setDraft(String(value));
-          e.currentTarget.blur();
-        }
-      }}
-      aria-label={ariaLabel || `Quantity of ${itemName}`}
-      className="tabular-nums no-spinners w-11 rounded border bg-transparent px-1 py-0.5 text-center text-base sm:text-[13px]"
-      style={{ borderColor: 'var(--border-subtle)' }}
-    />
-  );
-}
 
 interface PantryPanelProps {
   db: RecipeDatabase;
@@ -136,16 +76,11 @@ interface PantryPanelProps {
   onCloseMobile?: () => void;
   onRequestOpenMobilePantry?: () => void;
   onCollapseDesktop?: () => void;
+  onOpenFullPantry?: () => void;
+  onOpenExportImport?: () => void;
 }
 
 type GroupFilter = 'all' | 'food' | 'distillation' | 'lab';
-
-interface SelectableItemEntry {
-  item: Item;
-  distillHint: string;
-  searchText: string;
-  isSafeRecipeItem: boolean;
-}
 
 interface PantryPickerRowProps {
   item: Item;
@@ -477,7 +412,7 @@ const AcquirePickerRow = memo(function AcquirePickerRow({
 });
 
 function matchesPickerFilter(
-  entry: SelectableItemEntry,
+  entry: PantryCatalogEntry,
   group: GroupFilter,
   queryLower: string,
   hideUnsafeSoups: boolean,
@@ -558,6 +493,8 @@ export function PantryPanel({
   onCloseMobile,
   onRequestOpenMobilePantry,
   onCollapseDesktop,
+  onOpenFullPantry,
+  onOpenExportImport,
 }: PantryPanelProps) {
   const [itemSearch, setItemSearch] = useState('');
   const deferredSearch = useDeferredValue(itemSearch);
@@ -592,6 +529,7 @@ export function PantryPanel({
     if (isMobileDrawer) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (
+        e.defaultPrevented ||
         (e.key !== 'p' && e.key !== 'P') ||
         e.ctrlKey ||
         e.metaKey ||
@@ -630,63 +568,7 @@ export function PantryPanel({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isMobileDrawer, activeView, onViewChange, onRequestOpenMobilePantry]);
 
-  const selectableItems = useMemo<SelectableItemEntry[]>(() => {
-    const usedIds = new Set<string>();
-    const safeIds = new Set<string>();
-    const safeUsageCount = new Map<string, number>();
-
-    for (const r of db.recipes) {
-      const isUnsafe = r.subcategory === 'unsafe-soup';
-      const seenInRecipe = new Set<string>();
-      for (const ing of r.ingredients) {
-        usedIds.add(ing.itemId);
-        if (!isUnsafe) {
-          safeIds.add(ing.itemId);
-          if (!seenInRecipe.has(ing.itemId)) {
-            seenInRecipe.add(ing.itemId);
-            safeUsageCount.set(
-              ing.itemId,
-              (safeUsageCount.get(ing.itemId) ?? 0) + 1
-            );
-          }
-        }
-      }
-    }
-    for (const item of Object.values(db.items)) {
-      if ((item.distillsInto?.length ?? 0) > 0) {
-        usedIds.add(item.id);
-        safeIds.add(item.id);
-      }
-    }
-    return [...usedIds]
-      .map((id) => db.items[id])
-      .filter((it): it is Item => Boolean(it))
-      .sort(
-        (a, b) =>
-          (safeUsageCount.get(b.id) ?? 0) - (safeUsageCount.get(a.id) ?? 0) ||
-          a.name.localeCompare(b.name)
-      )
-      .map((item) => {
-        const distillHint =
-          item.distillsInto && item.distillsInto.length > 0
-            ? item.distillsInto
-                .map(
-                  (d) =>
-                    `${db.items[d.distillationId]?.name.replace(' Distillation', '') || d.distillationId} x${d.amount}`
-                )
-                .join(', ')
-            : '';
-        const distFullNames = (item.distillsInto || [])
-          .map((d) => db.items[d.distillationId]?.name || '')
-          .join(' ');
-        return {
-          item,
-          distillHint,
-          searchText: `${item.name} ${distFullNames}`.toLowerCase(),
-          isSafeRecipeItem: safeIds.has(item.id),
-        };
-      });
-  }, [db]);
+  const selectableItems = useMemo(() => getPantryCatalog(db), [db]);
 
   const distillHintById = useMemo(() => {
     const map = new Map<string, string>();
@@ -853,37 +735,74 @@ export function PantryPanel({
                 : 'Track ingredients and gear to scavenge, then move them to Pantry.'}
             </p>
           </div>
-          {onCollapseDesktop && !isMobileDrawer && (
-            <button
-              type="button"
-              onClick={onCollapseDesktop}
-              aria-label="Collapse pantry sidebar"
-              title="Collapse pantry sidebar"
-              className="surface-hover touch-target hidden shrink-0 items-center justify-center rounded border p-1.5 transition-colors min-[860px]:inline-flex"
-              style={{
-                backgroundColor: 'var(--bg-elevated)',
-                borderColor: 'var(--border-subtle)',
-                color: 'var(--text-secondary)',
-              }}
-            >
-              <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
-            </button>
-          )}
-          {onCloseMobile && (
-            <button
-              type="button"
-              onClick={onCloseMobile}
-              aria-label="Close pantry drawer"
-              className="surface-hover touch-target rounded border p-1.5 transition-colors min-[860px]:hidden"
-              style={{
-                backgroundColor: 'var(--bg-elevated)',
-                borderColor: 'var(--border-subtle)',
-                color: 'var(--text-secondary)',
-              }}
-            >
-              <X className="h-4 w-4" aria-hidden="true" />
-            </button>
-          )}
+          <div className="flex shrink-0 items-center gap-1">
+            {onOpenExportImport && (
+              <button
+                type="button"
+                onClick={onOpenExportImport}
+                aria-label="Export or import data"
+                title="Export / Import Pantry & Favourites"
+                className="surface-hover touch-target inline-flex items-center justify-center rounded border p-1.5 transition-colors"
+                style={{
+                  backgroundColor: 'var(--bg-elevated)',
+                  borderColor: 'var(--border-subtle)',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                <ArrowLeftRight className="h-4 w-4" aria-hidden="true" />
+              </button>
+            )}
+            {onOpenFullPantry && (
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenFullPantry();
+                  onCloseMobile?.();
+                }}
+                aria-label="Open full pantry view"
+                title="Open full Pantry workspace"
+                className="surface-hover touch-target inline-flex items-center justify-center rounded border p-1.5 transition-colors"
+                style={{
+                  backgroundColor: 'var(--bg-elevated)',
+                  borderColor: 'var(--border-subtle)',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                <LayoutGrid className="h-4 w-4" aria-hidden="true" />
+              </button>
+            )}
+            {onCollapseDesktop && !isMobileDrawer && (
+              <button
+                type="button"
+                onClick={onCollapseDesktop}
+                aria-label="Collapse pantry sidebar"
+                title="Collapse pantry sidebar"
+                className="surface-hover touch-target hidden shrink-0 items-center justify-center rounded border p-1.5 transition-colors min-[860px]:inline-flex"
+                style={{
+                  backgroundColor: 'var(--bg-elevated)',
+                  borderColor: 'var(--border-subtle)',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
+              </button>
+            )}
+            {onCloseMobile && (
+              <button
+                type="button"
+                onClick={onCloseMobile}
+                aria-label="Close pantry drawer"
+                className="surface-hover touch-target rounded border p-1.5 transition-colors min-[860px]:hidden"
+                style={{
+                  backgroundColor: 'var(--bg-elevated)',
+                  borderColor: 'var(--border-subtle)',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Pantry / To Acquire Switcher */}

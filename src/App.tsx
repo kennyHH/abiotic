@@ -17,6 +17,8 @@ import {
   Hammer,
   Info,
   LayoutGrid,
+  RotateCcw,
+  Star,
   Table2,
   X,
 } from 'lucide-react';
@@ -49,12 +51,23 @@ const DistillationGuide = lazy(() =>
     default: m.DistillationGuide,
   }))
 );
+const PantryWorkspace = lazy(() =>
+  import('./components/PantryWorkspace').then((m) => ({
+    default: m.PantryWorkspace,
+  }))
+);
+const ExportImportModal = lazy(() =>
+  import('./components/ExportImportModal').then((m) => ({
+    default: m.ExportImportModal,
+  }))
+);
 
 const db = rawDb as RecipeDatabase;
 
 export default function App() {
   const {
     pantry,
+    favorites,
     acquire,
     customAcquire,
     quantityMode,
@@ -63,21 +76,29 @@ export default function App() {
     tipDismissed,
     theme,
     selectedCount,
+    favoriteCount,
     acquireCount,
     lastClearedCount,
     lastRemovedItem,
     lastClearedAcquireCount,
     lastAcquiredItem,
+    lastImportSummary,
     toggleItem,
     fulfillOrToggleItem,
     setItemQuantity,
     incrementItem,
     decrementItem,
+    adjustItemQuantity,
     clearPantry,
+    clearPantrySubset,
     undoClearPantry,
     dismissUndo,
     undoRemovedItem,
     dismissRemovedItem,
+    toggleFavorite,
+    importPortableData,
+    undoImport,
+    dismissImportUndo,
     toggleAcquireItem,
     addAcquireItem,
     addMissingToAcquire,
@@ -112,13 +133,16 @@ export default function App() {
   const [workstation, setWorkstation] = useState<string>('all');
   const [subcategory, setSubcategory] = useState<'all' | RecipeSubcategory>('all');
   const [onlyBuffed, setOnlyBuffed] = useState(false);
+  const [onlyFavorites, setOnlyFavorites] = useState(false);
   const [sortBy, setSortBy] = useState<RecipeFilterOptions['sortBy']>('best-match');
   const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
   const [desktopPantryCollapsed, setDesktopPantryCollapsed] = useState(false);
   const [mobilePantryOpen, setMobilePantryOpen] = useState(false);
+  const [exportImportOpen, setExportImportOpen] = useState(false);
   const mobileDrawerRef = useRef<HTMLDivElement | null>(null);
-  const [showOtherWhenPantryActive, setShowOtherWhenPantryActive] =
-    useState(false);
+  const [showOtherWhenPantryActive, setShowOtherWhenPantryActive] = useState<
+    boolean | null
+  >(null);
   const [mobileToast, setMobileToast] = useState<{
     message: string;
     canUndo: boolean;
@@ -133,13 +157,18 @@ export default function App() {
     };
   }, []);
 
+  const favoriteIds = useMemo(() => new Set(favorites), [favorites]);
   const hasPantryItems = selectedCount > 0;
   const hasActiveFilters =
     search.trim().length > 0 ||
     workstation !== 'all' ||
     subcategory !== 'all' ||
     onlyBuffed ||
-    (!hideUnsafeSoups && (activeTab === 'all' || activeTab === 'soup'));
+    (activeTab !== 'favorites' && onlyFavorites) ||
+    (!hideUnsafeSoups &&
+      (activeTab === 'all' ||
+        activeTab === 'soup' ||
+        activeTab === 'favorites'));
 
   const handleToggleItemFromWorkspace = useCallback(
     (itemId: string, requiredQty?: number) => {
@@ -182,6 +211,32 @@ export default function App() {
     [fulfillOrToggleItem, mobilePantryOpen]
   );
 
+  const handleToggleAcquireFromRecipe = useCallback(
+    (itemId: string, defaultQty = 1) => {
+      const res = toggleAcquireItem(itemId, defaultQty);
+      if (
+        typeof window !== 'undefined' &&
+        window.innerWidth < 860 &&
+        !mobilePantryOpen
+      ) {
+        const name = db.items[itemId]?.name || itemId;
+        const message =
+          res.action === 'added'
+            ? `Added ${name}${res.qty > 1 ? ` (×${res.qty})` : ''} to To Acquire`
+            : `Removed ${name} from To Acquire`;
+        setMobileToast({ message, canUndo: false });
+        if (mobileToastTimerRef.current !== null) {
+          window.clearTimeout(mobileToastTimerRef.current);
+        }
+        mobileToastTimerRef.current = window.setTimeout(() => {
+          setMobileToast(null);
+          mobileToastTimerRef.current = null;
+        }, 3500);
+      }
+    },
+    [toggleAcquireItem, mobilePantryOpen]
+  );
+
   const handleCloseMobilePantry = useCallback(() => {
     setMobilePantryOpen(false);
   }, []);
@@ -192,6 +247,7 @@ export default function App() {
     setActiveTab(tab);
     setWorkstation('all');
     setSubcategory('all');
+    setShowOtherWhenPantryActive(null);
   }, []);
 
   const resetFilters = useCallback(() => {
@@ -199,6 +255,7 @@ export default function App() {
     setWorkstation('all');
     setSubcategory('all');
     setOnlyBuffed(false);
+    setOnlyFavorites(false);
     setHideUnsafeSoups(true);
   }, [setHideUnsafeSoups]);
 
@@ -217,14 +274,20 @@ export default function App() {
       food: db.recipes.filter((r) => r.category === 'food').length,
       chemistry: db.recipes.filter((r) => r.category === 'chemistry').length,
       distillations: db.distillationIds.length,
+      favorites: favoriteCount,
+      pantry: selectedCount,
     }),
-    []
+    [favoriteCount, selectedCount]
   );
 
   const availableWorkstations = useMemo(() => {
     const set = new Set<string>();
     for (const r of db.recipes) {
-      if (activeTab === 'all' || r.category === activeTab) {
+      if (
+        activeTab === 'all' ||
+        activeTab === 'favorites' ||
+        r.category === activeTab
+      ) {
         set.add(r.workstation);
       }
     }
@@ -247,14 +310,17 @@ export default function App() {
   );
 
   const filteredMatches = useMemo(() => {
-    if (activeTab === 'distillations') return [];
+    if (activeTab === 'distillations' || activeTab === 'pantry') return [];
+    const isFavoritesTab = activeTab === 'favorites';
     return filterAndSortMatches(evaluated, db, {
-      category: activeTab,
+      category: isFavoritesTab ? 'all' : activeTab,
       workstation,
       subcategory,
       hideUnsafeSoups,
       onlyBuffed,
-      featuredDefault: !hasPantryItems,
+      onlyFavorites: isFavoritesTab || onlyFavorites,
+      favoriteIds,
+      featuredDefault: !hasPantryItems && !isFavoritesTab && !onlyFavorites,
       search: deferredSearch,
       sortBy,
     });
@@ -265,19 +331,50 @@ export default function App() {
     subcategory,
     hideUnsafeSoups,
     onlyBuffed,
+    onlyFavorites,
+    favoriteIds,
     hasPantryItems,
     deferredSearch,
     sortBy,
   ]);
 
   const hiddenUnsafeCount = useMemo(() => {
-    if (!hideUnsafeSoups || (activeTab !== 'all' && activeTab !== 'soup')) {
+    if (
+      !hideUnsafeSoups ||
+      (activeTab !== 'all' &&
+        activeTab !== 'soup' &&
+        activeTab !== 'favorites')
+    ) {
       return 0;
     }
     if (workstation !== 'all' && workstation !== 'Cooking Pot') return 0;
     if (subcategory !== 'all' && subcategory !== 'unsafe-soup') return 0;
+    if (activeTab === 'favorites' || onlyFavorites) {
+      return db.recipes.filter(
+        (r) => r.subcategory === 'unsafe-soup' && favoriteIds.has(r.id)
+      ).length;
+    }
     return db.recipes.filter((r) => r.subcategory === 'unsafe-soup').length;
-  }, [hideUnsafeSoups, activeTab, workstation, subcategory]);
+  }, [hideUnsafeSoups, activeTab, onlyFavorites, workstation, subcategory, favoriteIds]);
+
+  const allCraftableCount = useMemo(
+    () =>
+      evaluated.filter(
+        (m) =>
+          m.status === 'craftable' &&
+          (!hideUnsafeSoups || m.recipe.subcategory !== 'unsafe-soup')
+      ).length,
+    [evaluated, hideUnsafeSoups]
+  );
+  const allAlmostCount = useMemo(
+    () =>
+      evaluated.filter(
+        (m) =>
+          m.status === 'almost' &&
+          (!hideUnsafeSoups || m.recipe.subcategory !== 'unsafe-soup')
+      ).length,
+    [evaluated, hideUnsafeSoups]
+  );
 
   const craftableNow = useMemo(
     () => filteredMatches.filter((m) => m.status === 'craftable'),
@@ -319,8 +416,11 @@ export default function App() {
             db={db}
             hasPantryItems={hasPantryItems}
             quantityMode={quantityMode}
+            acquire={acquire}
+            favoriteIds={favoriteIds}
             onSelectRecipe={handleSelectRecipe}
-            onTogglePantryItem={handleToggleItemFromWorkspace}
+            onToggleAcquireItem={handleToggleAcquireFromRecipe}
+            onToggleFavorite={toggleFavorite}
           />
         </Suspense>
       );
@@ -334,9 +434,12 @@ export default function App() {
             db={db}
             hasPantryItems={hasPantryItems}
             quantityMode={quantityMode}
+            acquire={acquire}
+            isFavorite={favoriteIds.has(res.recipe.id)}
             eager={idx < 12}
             onSelectRecipe={handleSelectRecipe}
-            onTogglePantryItem={handleToggleItemFromWorkspace}
+            onToggleAcquireItem={handleToggleAcquireFromRecipe}
+            onToggleFavorite={toggleFavorite}
           />
         ))}
       </div>
@@ -363,14 +466,23 @@ export default function App() {
         onToggleTheme={toggleTheme}
         syncedAt={db.syncedAt}
         desktopPantryCollapsed={desktopPantryCollapsed}
-        onExpandDesktopPantry={() => {
-          setSidebarView('pantry');
-          setDesktopPantryCollapsed(false);
-        }}
-        onExpandDesktopAcquire={() => {
-          setSidebarView('acquire');
-          setDesktopPantryCollapsed(false);
-        }}
+        onExpandDesktopPantry={
+          activeTab === 'pantry'
+            ? undefined
+            : () => {
+                setSidebarView('pantry');
+                setDesktopPantryCollapsed(false);
+              }
+        }
+        onExpandDesktopAcquire={
+          activeTab === 'pantry'
+            ? undefined
+            : () => {
+                setSidebarView('acquire');
+                setDesktopPantryCollapsed(false);
+              }
+        }
+        onOpenExportImport={() => setExportImportOpen(true)}
         selectedPantryCount={selectedCount}
         acquireCount={acquireCount}
       />
@@ -380,7 +492,7 @@ export default function App() {
         <aside
           aria-label="My Inventory and Pantry"
           className={
-            desktopPantryCollapsed
+            desktopPantryCollapsed || activeTab === 'pantry'
               ? 'hidden'
               : 'hidden w-72 shrink-0 border-r min-[860px]:flex min-[860px]:flex-col min-[860px]:overflow-hidden lg:w-80 xl:w-96'
           }
@@ -433,15 +545,21 @@ export default function App() {
             onDismissAcquiredItem={dismissAcquiredItem}
             onSetQuantityMode={setQuantityMode}
             onSetIncludeDistillationChain={setIncludeDistillationChain}
-            onRequestOpenMobilePantry={() => {
-              setSidebarView('pantry');
-              if (desktopPantryCollapsed) {
-                setDesktopPantryCollapsed(false);
-              } else {
-                setMobilePantryOpen(true);
-              }
-            }}
+            onRequestOpenMobilePantry={
+              activeTab === 'pantry'
+                ? undefined
+                : () => {
+                    setSidebarView('pantry');
+                    if (desktopPantryCollapsed) {
+                      setDesktopPantryCollapsed(false);
+                    } else {
+                      setMobilePantryOpen(true);
+                    }
+                  }
+            }
             onCollapseDesktop={() => setDesktopPantryCollapsed(true)}
+            onOpenFullPantry={() => setActiveTab('pantry')}
+            onOpenExportImport={() => setExportImportOpen(true)}
           />
         </aside>
 
@@ -510,6 +628,11 @@ export default function App() {
                 onSetQuantityMode={setQuantityMode}
                 onSetIncludeDistillationChain={setIncludeDistillationChain}
                 onCloseMobile={() => setMobilePantryOpen(false)}
+                onOpenFullPantry={() => setActiveTab('pantry')}
+                onOpenExportImport={() => {
+                  setMobilePantryOpen(false);
+                  setExportImportOpen(true);
+                }}
               />
             </div>
           </div>
@@ -523,7 +646,97 @@ export default function App() {
             aria-labelledby={`tab-${activeTab}`}
             className="space-y-4 min-[860px]:space-y-5"
           >
-          {activeTab === 'distillations' ? (
+          {lastImportSummary && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-l-[3px] px-4 py-2.5 text-xs"
+              style={{
+                backgroundColor: 'var(--accent-chem-bg)',
+                borderColor: 'var(--accent-chem-border)',
+                borderLeftColor: 'var(--accent-chem)',
+                color: 'var(--text-primary)',
+              }}
+            >
+              <span className="tabular-nums">
+                Imported ({lastImportSummary.mode}):{' '}
+                {lastImportSummary.pantryCount} pantry,{' '}
+                {lastImportSummary.favoriteCount} favourites,{' '}
+                {lastImportSummary.acquireCount} acquire.
+              </span>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={undoImport}
+                  className="surface-hover pressable inline-flex items-center gap-1 rounded border px-2.5 py-1 font-semibold"
+                  style={{
+                    backgroundColor: 'var(--bg-surface)',
+                    borderColor: 'var(--border-strong)',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  <RotateCcw className="h-3 w-3" aria-hidden="true" />
+                  Undo
+                </button>
+                <button
+                  type="button"
+                  onClick={dismissImportUndo}
+                  aria-label="Dismiss import notice"
+                  className="touch-target inline-flex items-center justify-center rounded hover:opacity-80"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'pantry' ? (
+            <Suspense
+              fallback={
+                <div
+                  className="rounded-md border py-12 text-center text-xs"
+                  style={{
+                    backgroundColor: 'var(--bg-surface)',
+                    borderColor: 'var(--border-subtle)',
+                    color: 'var(--text-muted)',
+                  }}
+                >
+                  Loading Pantry Manager...
+                </div>
+              }
+            >
+              <PantryWorkspace
+                db={db}
+                pantry={pantry}
+                acquire={acquire}
+                quantityMode={quantityMode}
+                includeDistillationChain={includeDistillationChain}
+                hideUnsafeSoups={hideUnsafeSoups}
+                distillationSummary={distillationSummary}
+                craftableCount={allCraftableCount}
+                almostCount={allAlmostCount}
+                lastClearedCount={lastClearedCount}
+                lastRemovedItem={lastRemovedItem}
+                onToggleItem={toggleItem}
+                onIncrementItem={incrementItem}
+                onDecrementItem={decrementItem}
+                onSetQuantity={setItemQuantity}
+                onAdjustQuantity={adjustItemQuantity}
+                onClearPantry={clearPantry}
+                onClearPantrySubset={clearPantrySubset}
+                onUndoClearPantry={undoClearPantry}
+                onDismissUndo={dismissUndo}
+                onUndoRemovedItem={undoRemovedItem}
+                onDismissRemovedItem={dismissRemovedItem}
+                onMarkItemAcquired={markItemAcquired}
+                onSetQuantityMode={setQuantityMode}
+                onSetIncludeDistillationChain={setIncludeDistillationChain}
+                onNavigateToRecipes={() => handleTabChange('all')}
+                onOpenExportImport={() => setExportImportOpen(true)}
+              />
+            </Suspense>
+          ) : activeTab === 'distillations' ? (
             <Suspense
               fallback={
                 <div
@@ -561,6 +774,9 @@ export default function App() {
                 onHideUnsafeSoupsChange={setHideUnsafeSoups}
                 onlyBuffed={onlyBuffed}
                 onOnlyBuffedChange={setOnlyBuffed}
+                onlyFavorites={onlyFavorites}
+                onOnlyFavoritesChange={setOnlyFavorites}
+                favoriteCount={favoriteCount}
                 hasPantryItems={hasPantryItems}
                 hasActiveFilters={hasActiveFilters}
                 onResetFilters={resetFilters}
@@ -570,7 +786,48 @@ export default function App() {
                 hiddenUnsafeCount={hiddenUnsafeCount}
               />
 
-              {!hasPantryItems ? (
+              {activeTab === 'favorites' && favoriteCount === 0 ? (
+                <div
+                  className="flex flex-col items-center gap-3 rounded-md border py-14 text-center text-sm"
+                  style={{
+                    backgroundColor: 'var(--bg-surface)',
+                    borderColor: 'var(--border-subtle)',
+                    color: 'var(--text-muted)',
+                    boxShadow: 'var(--shadow-card)',
+                  }}
+                >
+                  <Star
+                    className="h-8 w-8"
+                    aria-hidden="true"
+                    style={{ color: 'var(--accent-food)' }}
+                  />
+                  <div className="space-y-1">
+                    <p
+                      className="font-semibold"
+                      style={{ color: 'var(--text-primary)' }}
+                    >
+                      No favourite recipes yet
+                    </p>
+                    <p className="text-pretty max-w-[52ch] text-xs leading-relaxed">
+                      Tap the Star button on any recipe card, table row, or
+                      recipe detail drawer to pin your go-to meals and mixes
+                      here.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleTabChange('all')}
+                    className="surface-hover pressable rounded border px-3 py-1.5 text-xs font-semibold"
+                    style={{
+                      backgroundColor: 'var(--accent-food-bg)',
+                      borderColor: 'var(--accent-food-border)',
+                      color: 'var(--accent-food)',
+                    }}
+                  >
+                    Browse All Recipes
+                  </button>
+                </div>
+              ) : !hasPantryItems ? (
                 <div className="space-y-3.5">
                   <h2 className="sr-only">Recipe catalog</h2>
                   {!tipDismissed && (
@@ -589,8 +846,9 @@ export default function App() {
                           style={{ color: 'var(--accent-chem)' }}
                         />
                         <span>
-                          Check items in your Pantry or tap any ingredient pill on a
-                          card to see what you can craft right now.
+                          Check items in your Pantry to see what you can craft,
+                          or tap any ingredient pill on a recipe to add it to To
+                          Acquire.
                         </span>
                       </span>
                       <button
@@ -640,7 +898,9 @@ export default function App() {
                           </button>
                         )}
                         {hideUnsafeSoups &&
-                          (activeTab === 'all' || activeTab === 'soup') && (
+                          (activeTab === 'all' ||
+                            activeTab === 'soup' ||
+                            activeTab === 'favorites') && (
                             <button
                               type="button"
                               onClick={() => setHideUnsafeSoups(false)}
@@ -808,35 +1068,42 @@ export default function App() {
                   </section>
 
                   {/* Remaining Recipes (Collapsible) */}
-                  {otherRecipes.length > 0 && (
-                    <section className="space-y-3">
-                      <button
-                        type="button"
-                        aria-expanded={showOtherWhenPantryActive}
-                        onClick={() =>
-                          setShowOtherWhenPantryActive((prev) => !prev)
-                        }
-                        className="surface-hover flex w-full items-center justify-between rounded-md border px-4 py-2.5 text-left text-sm font-semibold transition-colors"
-                        style={{
-                          backgroundColor: 'var(--bg-surface)',
-                          borderColor: 'var(--border-subtle)',
-                          color: 'var(--text-secondary)',
-                        }}
-                      >
-                        <span>
-                          Other Matching Recipes ({otherRecipes.length})
-                        </span>
-                        {showOtherWhenPantryActive ? (
-                          <ChevronUp className="h-4 w-4" />
-                        ) : (
-                          <ChevronDown className="h-4 w-4" />
-                        )}
-                      </button>
+                  {otherRecipes.length > 0 && (() => {
+                    const autoExpandFavorites =
+                      activeTab === 'favorites' &&
+                      craftableNow.length === 0 &&
+                      almostCraftable.length === 0;
+                    const isExpanded =
+                      showOtherWhenPantryActive ?? autoExpandFavorites;
+                    return (
+                      <section className="space-y-3">
+                        <button
+                          type="button"
+                          aria-expanded={isExpanded}
+                          onClick={() =>
+                            setShowOtherWhenPantryActive(!isExpanded)
+                          }
+                          className="surface-hover flex w-full items-center justify-between rounded-md border px-4 py-2.5 text-left text-sm font-semibold transition-colors"
+                          style={{
+                            backgroundColor: 'var(--bg-surface)',
+                            borderColor: 'var(--border-subtle)',
+                            color: 'var(--text-secondary)',
+                          }}
+                        >
+                          <span>
+                            Other Matching Recipes ({otherRecipes.length})
+                          </span>
+                          {isExpanded ? (
+                            <ChevronUp className="h-4 w-4" />
+                          ) : (
+                            <ChevronDown className="h-4 w-4" />
+                          )}
+                        </button>
 
-                      {showOtherWhenPantryActive &&
-                        renderRecipeCollection(otherRecipes)}
-                    </section>
-                  )}
+                        {isExpanded && renderRecipeCollection(otherRecipes)}
+                      </section>
+                    );
+                  })()}
                 </div>
               )}
             </>
@@ -946,7 +1213,9 @@ export default function App() {
           </button>
         </div>
 
-        {hasPantryItems && activeTab !== 'distillations' && (
+        {hasPantryItems &&
+          activeTab !== 'distillations' &&
+          activeTab !== 'pantry' && (
           <div
             className="font-readout truncate px-1 text-xs font-medium sm:pr-2"
             style={{ color: 'var(--text-secondary)' }}
@@ -961,7 +1230,7 @@ export default function App() {
           </div>
         )}
 
-        {activeTab !== 'distillations' && (
+        {activeTab !== 'distillations' && activeTab !== 'pantry' && (
           <button
             type="button"
             onClick={() =>
@@ -1002,6 +1271,7 @@ export default function App() {
             pantry={pantry}
             acquire={acquire}
             quantityMode={quantityMode}
+            isFavorite={favoriteIds.has(selectedResult.recipe.id)}
             onClose={handleCloseDrawer}
             onTogglePantryItem={handleToggleItemFromWorkspace}
             onToggleAcquireItem={toggleAcquireItem}
@@ -1009,6 +1279,22 @@ export default function App() {
             onIncrementItem={incrementItem}
             onDecrementItem={decrementItem}
             onSetQuantity={setItemQuantity}
+            onToggleFavorite={toggleFavorite}
+          />
+        )}
+      </Suspense>
+
+      <Suspense fallback={null}>
+        {exportImportOpen && (
+          <ExportImportModal
+            open={exportImportOpen}
+            db={db}
+            pantry={pantry}
+            favorites={favorites}
+            acquire={acquire}
+            customAcquire={customAcquire}
+            onClose={() => setExportImportOpen(false)}
+            onImportData={importPortableData}
           />
         )}
       </Suspense>

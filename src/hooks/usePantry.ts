@@ -1,11 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  clampQty,
+  FORBIDDEN_KEYS,
+  mergePortableData,
+  sanitizeCustomAcquire,
+  sanitizeFavorites,
+  sanitizeItemMap,
+  type CustomAcquireItem,
+  type PortableData,
+} from '../lib/portability';
 
+export type { CustomAcquireItem } from '../lib/portability';
 export type ThemeMode = 'dark' | 'light';
 
-export interface CustomAcquireItem {
-  id: string;
-  name: string;
-  qty: number;
+export interface ImportSummary {
+  mode: 'replace' | 'merge';
+  pantryCount: number;
+  favoriteCount: number;
+  acquireCount: number;
 }
 
 export type LastAcquiredItem =
@@ -22,6 +34,7 @@ export type LastAcquiredItem =
 
 interface PersistedState {
   pantry: Record<string, number>;
+  favorites: string[];
   acquire: Record<string, number>;
   customAcquire: CustomAcquireItem[];
   quantityMode: boolean;
@@ -32,10 +45,10 @@ interface PersistedState {
 }
 
 export const PANTRY_STORAGE_KEY = 'abiotic-compendium-state-v1';
-const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 const DEFAULT_STATE: PersistedState = {
   pantry: {},
+  favorites: [],
   acquire: {},
   customAcquire: [],
   quantityMode: false,
@@ -45,55 +58,6 @@ const DEFAULT_STATE: PersistedState = {
   theme: 'dark',
 };
 
-function clampQty(qty: number): number {
-  if (!Number.isFinite(qty)) return 1;
-  return Math.min(999, Math.max(1, Math.floor(qty)));
-}
-
-function sanitizeItemMap(raw: unknown): Record<string, number> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return {};
-  }
-  const clean: Record<string, number> = {};
-  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
-    if (!key || FORBIDDEN_KEYS.has(key)) continue;
-    const num = typeof val === 'number' ? val : Number(val);
-    if (!Number.isFinite(num) || num <= 0) continue;
-    clean[key] = clampQty(num);
-  }
-  return clean;
-}
-
-function sanitizeCustomAcquire(raw: unknown): CustomAcquireItem[] {
-  if (!Array.isArray(raw)) return [];
-  const clean: CustomAcquireItem[] = [];
-  const seenIds = new Set<string>();
-  for (const entry of raw) {
-    if (clean.length >= 200) break;
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-    const candidate = entry as Record<string, unknown>;
-    if (typeof candidate.id !== 'string' || typeof candidate.name !== 'string') {
-      continue;
-    }
-    const id = candidate.id.trim();
-    if (!id || id.length > 64 || FORBIDDEN_KEYS.has(id) || seenIds.has(id)) {
-      continue;
-    }
-    const name = candidate.name.trim().replace(/\s+/g, ' ').slice(0, 80);
-    if (!name) continue;
-    const num =
-      typeof candidate.qty === 'number' ? candidate.qty : Number(candidate.qty);
-    if (!Number.isFinite(num) || num <= 0) continue;
-    seenIds.add(id);
-    clean.push({
-      id,
-      name,
-      qty: clampQty(num),
-    });
-  }
-  return clean;
-}
-
 function loadInitialState(): PersistedState {
   try {
     const raw = window.localStorage?.getItem?.(PANTRY_STORAGE_KEY);
@@ -102,6 +66,7 @@ function loadInitialState(): PersistedState {
     if (!parsed || typeof parsed !== 'object') return DEFAULT_STATE;
     return {
       pantry: sanitizeItemMap(parsed.pantry),
+      favorites: sanitizeFavorites(parsed.favorites),
       acquire: sanitizeItemMap(parsed.acquire),
       customAcquire: sanitizeCustomAcquire(parsed.customAcquire),
       quantityMode: Boolean(parsed.quantityMode),
@@ -137,15 +102,19 @@ export function usePantry() {
   } | null>(null);
   const [lastAcquiredItem, setLastAcquiredItem] =
     useState<LastAcquiredItem | null>(null);
+  const [lastImportSummary, setLastImportSummary] =
+    useState<ImportSummary | null>(null);
 
   const undoTimerRef = useRef<number | null>(null);
   const removedItemTimerRef = useRef<number | null>(null);
   const acquireUndoTimerRef = useRef<number | null>(null);
   const acquiredItemTimerRef = useRef<number | null>(null);
+  const importUndoTimerRef = useRef<number | null>(null);
   const lastClearedAcquireRef = useRef(lastClearedAcquire);
   lastClearedAcquireRef.current = lastClearedAcquire;
   const lastAcquiredItemRef = useRef(lastAcquiredItem);
   lastAcquiredItemRef.current = lastAcquiredItem;
+  const lastPreImportSnapshotRef = useRef<PortableData | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -177,18 +146,27 @@ export function usePantry() {
     }
   }, []);
 
+  const clearImportUndoTimer = useCallback(() => {
+    if (importUndoTimerRef.current !== null) {
+      window.clearTimeout(importUndoTimerRef.current);
+      importUndoTimerRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     return () => {
       clearUndoTimer();
       clearRemovedItemTimer();
       clearAcquireUndoTimer();
       clearAcquiredItemTimer();
+      clearImportUndoTimer();
     };
   }, [
     clearUndoTimer,
     clearRemovedItemTimer,
     clearAcquireUndoTimer,
     clearAcquiredItemTimer,
+    clearImportUndoTimer,
   ]);
 
   useEffect(() => {
@@ -225,9 +203,16 @@ export function usePantry() {
     setLastAcquiredItem(null);
   }, [clearAcquiredItemTimer]);
 
+  const dismissImportUndo = useCallback(() => {
+    clearImportUndoTimer();
+    lastPreImportSnapshotRef.current = null;
+    setLastImportSummary(null);
+  }, [clearImportUndoTimer]);
+
   const toggleItem = useCallback(
     (id: string) => {
       dismissUndo();
+      dismissImportUndo();
       const curState = stateRef.current;
       const curQty = curState.pantry[id] ?? 0;
       if (curQty > 0 && (curState.quantityMode || curQty > 1)) {
@@ -250,7 +235,7 @@ export function usePantry() {
         return { ...prev, pantry: nextPantry };
       });
     },
-    [dismissUndo, clearRemovedItemTimer, dismissRemovedItem]
+    [dismissUndo, dismissImportUndo, clearRemovedItemTimer, dismissRemovedItem]
   );
 
   const fulfillOrToggleItem = useCallback(
@@ -263,6 +248,7 @@ export function usePantry() {
       nextQty: number;
     } => {
       dismissUndo();
+      dismissImportUndo();
       const curState = stateRef.current;
       const curQty = curState.pantry[id] ?? 0;
 
@@ -332,7 +318,7 @@ export function usePantry() {
         nextQty: 0,
       };
     },
-    [dismissUndo, clearRemovedItemTimer, dismissRemovedItem]
+    [dismissUndo, dismissImportUndo, clearRemovedItemTimer, dismissRemovedItem]
   );
 
   const undoRemovedItem = useCallback(() => {
@@ -355,6 +341,7 @@ export function usePantry() {
     (id: string, qty = 1) => {
       dismissUndo();
       dismissRemovedItem();
+      dismissImportUndo();
       const clamped = Math.min(999, Math.max(1, Math.floor(qty)));
       setState((prev) => {
         const nextPantry = { ...prev.pantry };
@@ -362,13 +349,14 @@ export function usePantry() {
         return { ...prev, pantry: nextPantry };
       });
     },
-    [dismissUndo, dismissRemovedItem]
+    [dismissUndo, dismissRemovedItem, dismissImportUndo]
   );
 
   const setItemQuantity = useCallback(
     (id: string, qty: number) => {
       dismissUndo();
       dismissRemovedItem();
+      dismissImportUndo();
       setState((prev) => {
         const nextPantry = { ...prev.pantry };
         if (!Number.isFinite(qty) || qty <= 0) {
@@ -379,57 +367,89 @@ export function usePantry() {
         return { ...prev, pantry: nextPantry };
       });
     },
-    [dismissUndo, dismissRemovedItem]
+    [dismissUndo, dismissRemovedItem, dismissImportUndo]
   );
 
-  const incrementItem = useCallback(
-    (id: string) => {
+  const adjustItemQuantity = useCallback(
+    (id: string, delta: number) => {
+      if (!Number.isFinite(delta) || delta === 0) return;
       dismissUndo();
       dismissRemovedItem();
-      setState((prev) => ({
-        ...prev,
-        pantry: {
-          ...prev.pantry,
-          [id]: Math.min(999, (prev.pantry[id] ?? 0) + 1),
-        },
-      }));
-    },
-    [dismissUndo, dismissRemovedItem]
-  );
-
-  const decrementItem = useCallback(
-    (id: string) => {
-      dismissUndo();
-      dismissRemovedItem();
+      dismissImportUndo();
       setState((prev) => {
         const cur = prev.pantry[id] ?? 0;
+        const nextQty = cur + Math.trunc(delta);
         const nextPantry = { ...prev.pantry };
-        if (cur <= 1) {
+        if (nextQty <= 0) {
           delete nextPantry[id];
         } else {
-          nextPantry[id] = cur - 1;
+          nextPantry[id] = clampQty(nextQty);
         }
         return { ...prev, pantry: nextPantry };
       });
     },
-    [dismissUndo, dismissRemovedItem]
+    [dismissUndo, dismissRemovedItem, dismissImportUndo]
+  );
+
+  const incrementItem = useCallback(
+    (id: string) => adjustItemQuantity(id, 1),
+    [adjustItemQuantity]
+  );
+
+  const decrementItem = useCallback(
+    (id: string) => adjustItemQuantity(id, -1),
+    [adjustItemQuantity]
   );
 
   const clearPantry = useCallback(() => {
     dismissRemovedItem();
-    setState((prev) => {
-      const entries = Object.entries(prev.pantry).filter(([, q]) => q > 0);
-      if (entries.length === 0) return prev;
-      const snapshot = { ...prev.pantry };
+    const cur = stateRef.current;
+    const entries = Object.entries(cur.pantry).filter(([, q]) => q > 0);
+    if (entries.length === 0) return;
+    dismissImportUndo();
+    const snapshot = { ...cur.pantry };
+    clearUndoTimer();
+    setLastClearedPantry(snapshot);
+    undoTimerRef.current = window.setTimeout(() => {
+      setLastClearedPantry(null);
+      undoTimerRef.current = null;
+    }, 12000);
+    setState((prev) => ({ ...prev, pantry: {} }));
+  }, [clearUndoTimer, dismissRemovedItem, dismissImportUndo]);
+
+  const clearPantrySubset = useCallback(
+    (itemIds: string[]) => {
+      if (itemIds.length === 0) return;
+      dismissRemovedItem();
+      const cur = stateRef.current;
+      const subsetSnapshot: Record<string, number> = {};
+      for (const id of itemIds) {
+        const qty = cur.pantry[id] ?? 0;
+        if (qty > 0) {
+          subsetSnapshot[id] = qty;
+        }
+      }
+      const removedKeys = Object.keys(subsetSnapshot);
+      if (removedKeys.length === 0) return;
+      dismissImportUndo();
+
       clearUndoTimer();
-      setLastClearedPantry(snapshot);
+      setLastClearedPantry(subsetSnapshot);
       undoTimerRef.current = window.setTimeout(() => {
         setLastClearedPantry(null);
         undoTimerRef.current = null;
       }, 12000);
-      return { ...prev, pantry: {} };
-    });
-  }, [clearUndoTimer, dismissRemovedItem]);
+
+      setState((prev) => {
+        const nextPantry = { ...prev.pantry };
+        for (const id of removedKeys) {
+          delete nextPantry[id];
+        }
+        return { ...prev, pantry: nextPantry };
+      });
+    },
+    [clearUndoTimer, dismissRemovedItem, dismissImportUndo]
+  );
 
   const undoClearPantry = useCallback(() => {
     clearUndoTimer();
@@ -443,6 +463,107 @@ export function usePantry() {
       return null;
     });
   }, [clearUndoTimer]);
+
+  const toggleFavorite = useCallback(
+    (recipeId: string) => {
+      const cleanId = recipeId.trim();
+      if (!cleanId || FORBIDDEN_KEYS.has(cleanId)) return;
+      dismissImportUndo();
+      setState((prev) => {
+        const exists = prev.favorites.includes(cleanId);
+        const nextFavorites = exists
+          ? prev.favorites.filter((id) => id !== cleanId)
+          : prev.favorites.length >= 500
+            ? prev.favorites
+            : [...prev.favorites, cleanId];
+        return {
+          ...prev,
+          favorites: nextFavorites,
+        };
+      });
+    },
+    [dismissImportUndo]
+  );
+
+  const importPortableData = useCallback(
+    (incoming: PortableData, mode: 'replace' | 'merge') => {
+      const cur = stateRef.current;
+      const snapshot: PortableData = {
+        pantry: { ...cur.pantry },
+        favorites: [...cur.favorites],
+        acquire: { ...cur.acquire },
+        customAcquire: cur.customAcquire.map((it) => ({ ...it })),
+      };
+
+      dismissUndo();
+      dismissRemovedItem();
+      dismissClearAcquireUndo();
+      dismissAcquiredItem();
+      clearImportUndoTimer();
+
+      lastPreImportSnapshotRef.current = snapshot;
+      setLastImportSummary({
+        mode,
+        pantryCount: Object.keys(incoming.pantry).length,
+        favoriteCount: incoming.favorites.length,
+        acquireCount:
+          Object.keys(incoming.acquire).length + incoming.customAcquire.length,
+      });
+
+      importUndoTimerRef.current = window.setTimeout(() => {
+        lastPreImportSnapshotRef.current = null;
+        setLastImportSummary(null);
+        importUndoTimerRef.current = null;
+      }, 15000);
+
+      setState((prev) => {
+        const nextPortable: PortableData =
+          mode === 'replace'
+            ? {
+                pantry: { ...incoming.pantry },
+                favorites: [...incoming.favorites],
+                acquire: { ...incoming.acquire },
+                customAcquire: incoming.customAcquire.map((it) => ({ ...it })),
+              }
+            : mergePortableData(
+                {
+                  pantry: prev.pantry,
+                  favorites: prev.favorites,
+                  acquire: prev.acquire,
+                  customAcquire: prev.customAcquire,
+                },
+                incoming
+              );
+        return {
+          ...prev,
+          ...nextPortable,
+        };
+      });
+    },
+    [
+      dismissUndo,
+      dismissRemovedItem,
+      dismissClearAcquireUndo,
+      dismissAcquiredItem,
+      clearImportUndoTimer,
+    ]
+  );
+
+  const undoImport = useCallback(() => {
+    const snapshot = lastPreImportSnapshotRef.current;
+    clearImportUndoTimer();
+    lastPreImportSnapshotRef.current = null;
+    setLastImportSummary(null);
+    if (!snapshot) return;
+
+    setState((prev) => ({
+      ...prev,
+      pantry: { ...snapshot.pantry },
+      favorites: [...snapshot.favorites],
+      acquire: { ...snapshot.acquire },
+      customAcquire: snapshot.customAcquire.map((it) => ({ ...it })),
+    }));
+  }, [clearImportUndoTimer]);
 
   const setQuantityMode = useCallback((quantityMode: boolean) => {
     setState((prev) => ({ ...prev, quantityMode }));
@@ -471,10 +592,16 @@ export function usePantry() {
   }, []);
 
   const toggleAcquireItem = useCallback(
-    (id: string, defaultQty = 1) => {
+    (
+      id: string,
+      defaultQty = 1
+    ): { action: 'added' | 'removed'; qty: number } => {
       dismissClearAcquireUndo();
       dismissAcquiredItem();
+      dismissImportUndo();
       const qty = clampQty(defaultQty);
+      const curQty = stateRef.current.acquire[id] ?? 0;
+      const action = curQty > 0 ? 'removed' : 'added';
       setState((prev) => {
         const nextAcquire = { ...prev.acquire };
         if ((nextAcquire[id] ?? 0) > 0) {
@@ -484,14 +611,16 @@ export function usePantry() {
         }
         return { ...prev, acquire: nextAcquire };
       });
+      return { action, qty: action === 'added' ? qty : curQty };
     },
-    [dismissClearAcquireUndo, dismissAcquiredItem]
+    [dismissClearAcquireUndo, dismissAcquiredItem, dismissImportUndo]
   );
 
   const addAcquireItem = useCallback(
     (id: string, qty = 1) => {
       dismissClearAcquireUndo();
       dismissAcquiredItem();
+      dismissImportUndo();
       const clamped = clampQty(qty);
       setState((prev) => ({
         ...prev,
@@ -501,7 +630,7 @@ export function usePantry() {
         },
       }));
     },
-    [dismissClearAcquireUndo, dismissAcquiredItem]
+    [dismissClearAcquireUndo, dismissAcquiredItem, dismissImportUndo]
   );
 
   const addMissingToAcquire = useCallback(
@@ -509,6 +638,7 @@ export function usePantry() {
       if (items.length === 0) return;
       dismissClearAcquireUndo();
       dismissAcquiredItem();
+      dismissImportUndo();
       setState((prev) => {
         const nextAcquire = { ...prev.acquire };
         for (const entry of items) {
@@ -519,13 +649,14 @@ export function usePantry() {
         return { ...prev, acquire: nextAcquire };
       });
     },
-    [dismissClearAcquireUndo, dismissAcquiredItem]
+    [dismissClearAcquireUndo, dismissAcquiredItem, dismissImportUndo]
   );
 
   const setAcquireQuantity = useCallback(
     (id: string, qty: number) => {
       dismissClearAcquireUndo();
       dismissAcquiredItem();
+      dismissImportUndo();
       setState((prev) => {
         const nextAcquire = { ...prev.acquire };
         if (!Number.isFinite(qty) || qty <= 0) {
@@ -536,13 +667,14 @@ export function usePantry() {
         return { ...prev, acquire: nextAcquire };
       });
     },
-    [dismissClearAcquireUndo, dismissAcquiredItem]
+    [dismissClearAcquireUndo, dismissAcquiredItem, dismissImportUndo]
   );
 
   const incrementAcquireItem = useCallback(
     (id: string) => {
       dismissClearAcquireUndo();
       dismissAcquiredItem();
+      dismissImportUndo();
       setState((prev) => ({
         ...prev,
         acquire: {
@@ -551,13 +683,14 @@ export function usePantry() {
         },
       }));
     },
-    [dismissClearAcquireUndo, dismissAcquiredItem]
+    [dismissClearAcquireUndo, dismissAcquiredItem, dismissImportUndo]
   );
 
   const decrementAcquireItem = useCallback(
     (id: string) => {
       dismissClearAcquireUndo();
       dismissAcquiredItem();
+      dismissImportUndo();
       setState((prev) => {
         const cur = prev.acquire[id] ?? 0;
         const nextAcquire = { ...prev.acquire };
@@ -569,13 +702,14 @@ export function usePantry() {
         return { ...prev, acquire: nextAcquire };
       });
     },
-    [dismissClearAcquireUndo, dismissAcquiredItem]
+    [dismissClearAcquireUndo, dismissAcquiredItem, dismissImportUndo]
   );
 
   const removeAcquireItem = useCallback(
     (id: string) => {
       dismissClearAcquireUndo();
       dismissAcquiredItem();
+      dismissImportUndo();
       setState((prev) => {
         if (!(id in prev.acquire)) return prev;
         const nextAcquire = { ...prev.acquire };
@@ -583,7 +717,7 @@ export function usePantry() {
         return { ...prev, acquire: nextAcquire };
       });
     },
-    [dismissClearAcquireUndo, dismissAcquiredItem]
+    [dismissClearAcquireUndo, dismissAcquiredItem, dismissImportUndo]
   );
 
   const addCustomAcquireItem = useCallback(
@@ -599,6 +733,7 @@ export function usePantry() {
         (it) => it.name.toLowerCase() === cleanName.toLowerCase()
       );
       if (existing) {
+        dismissImportUndo();
         const nextQty = Math.min(999, existing.qty + clamped);
         const updatedItem: CustomAcquireItem = { ...existing, qty: nextQty };
         setState((prev) => ({
@@ -613,6 +748,7 @@ export function usePantry() {
       }
 
       if (curList.length >= 200) return null;
+      dismissImportUndo();
       const newItem: CustomAcquireItem = {
         id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         name: cleanName,
@@ -627,13 +763,14 @@ export function usePantry() {
       });
       return newItem;
     },
-    [dismissClearAcquireUndo, dismissAcquiredItem]
+    [dismissClearAcquireUndo, dismissAcquiredItem, dismissImportUndo]
   );
 
   const setCustomAcquireQuantity = useCallback(
     (id: string, qty: number) => {
       dismissClearAcquireUndo();
       dismissAcquiredItem();
+      dismissImportUndo();
       setState((prev) => ({
         ...prev,
         customAcquire:
@@ -644,13 +781,14 @@ export function usePantry() {
               ),
       }));
     },
-    [dismissClearAcquireUndo, dismissAcquiredItem]
+    [dismissClearAcquireUndo, dismissAcquiredItem, dismissImportUndo]
   );
 
   const incrementCustomAcquireItem = useCallback(
     (id: string) => {
       dismissClearAcquireUndo();
       dismissAcquiredItem();
+      dismissImportUndo();
       setState((prev) => ({
         ...prev,
         customAcquire: prev.customAcquire.map((it) =>
@@ -658,13 +796,14 @@ export function usePantry() {
         ),
       }));
     },
-    [dismissClearAcquireUndo, dismissAcquiredItem]
+    [dismissClearAcquireUndo, dismissAcquiredItem, dismissImportUndo]
   );
 
   const decrementCustomAcquireItem = useCallback(
     (id: string) => {
       dismissClearAcquireUndo();
       dismissAcquiredItem();
+      dismissImportUndo();
       setState((prev) => ({
         ...prev,
         customAcquire: prev.customAcquire.flatMap((it) => {
@@ -674,19 +813,20 @@ export function usePantry() {
         }),
       }));
     },
-    [dismissClearAcquireUndo, dismissAcquiredItem]
+    [dismissClearAcquireUndo, dismissAcquiredItem, dismissImportUndo]
   );
 
   const removeCustomAcquireItem = useCallback(
     (id: string) => {
       dismissClearAcquireUndo();
       dismissAcquiredItem();
+      dismissImportUndo();
       setState((prev) => ({
         ...prev,
         customAcquire: prev.customAcquire.filter((it) => it.id !== id),
       }));
     },
-    [dismissClearAcquireUndo, dismissAcquiredItem]
+    [dismissClearAcquireUndo, dismissAcquiredItem, dismissImportUndo]
   );
 
   const markItemAcquired = useCallback(
@@ -700,6 +840,7 @@ export function usePantry() {
       clearAcquiredItemTimer();
       dismissUndo();
       dismissRemovedItem();
+      dismissImportUndo();
 
       const snapshot: LastAcquiredItem = {
         isCustom: false,
@@ -735,6 +876,7 @@ export function usePantry() {
       clearAcquiredItemTimer,
       dismissUndo,
       dismissRemovedItem,
+      dismissImportUndo,
     ]
   );
 
@@ -745,6 +887,7 @@ export function usePantry() {
 
       dismissClearAcquireUndo();
       clearAcquiredItemTimer();
+      dismissImportUndo();
 
       const snapshot: LastAcquiredItem = {
         isCustom: true,
@@ -763,7 +906,7 @@ export function usePantry() {
         customAcquire: prev.customAcquire.filter((it) => it.id !== id),
       }));
     },
-    [dismissClearAcquireUndo, clearAcquiredItemTimer]
+    [dismissClearAcquireUndo, clearAcquiredItemTimer, dismissImportUndo]
   );
 
   const undoAcquiredItem = useCallback(() => {
@@ -810,6 +953,7 @@ export function usePantry() {
     if (acqEntries.length === 0 && cur.customAcquire.length === 0) return;
 
     dismissAcquiredItem();
+    dismissImportUndo();
     const snapshot = {
       acquire: { ...cur.acquire },
       customAcquire: cur.customAcquire.map((it) => ({ ...it })),
@@ -824,7 +968,7 @@ export function usePantry() {
     }, 12000);
 
     setState((prev) => ({ ...prev, acquire: {}, customAcquire: [] }));
-  }, [dismissAcquiredItem, clearAcquireUndoTimer]);
+  }, [dismissAcquiredItem, dismissImportUndo, clearAcquireUndoTimer]);
 
   const undoClearAcquireList = useCallback(() => {
     const snapshot = lastClearedAcquireRef.current;
@@ -847,6 +991,7 @@ export function usePantry() {
   }, [clearAcquireUndoTimer]);
 
   const selectedCount = Object.values(state.pantry).filter((q) => q > 0).length;
+  const favoriteCount = state.favorites.length;
   const acquireCount =
     Object.values(state.acquire).filter((q) => q > 0).length +
     state.customAcquire.length;
@@ -860,6 +1005,7 @@ export function usePantry() {
 
   return {
     pantry: state.pantry,
+    favorites: state.favorites,
     acquire: state.acquire,
     customAcquire: state.customAcquire,
     quantityMode: state.quantityMode,
@@ -868,22 +1014,30 @@ export function usePantry() {
     tipDismissed: state.tipDismissed,
     theme: state.theme,
     selectedCount,
+    favoriteCount,
     acquireCount,
     lastClearedCount,
     lastRemovedItem,
     lastClearedAcquireCount,
     lastAcquiredItem,
+    lastImportSummary,
     toggleItem,
     fulfillOrToggleItem,
     addItem,
     setItemQuantity,
     incrementItem,
     decrementItem,
+    adjustItemQuantity,
     clearPantry,
+    clearPantrySubset,
     undoClearPantry,
     dismissUndo,
     undoRemovedItem,
     dismissRemovedItem,
+    toggleFavorite,
+    importPortableData,
+    undoImport,
+    dismissImportUndo,
     toggleAcquireItem,
     addAcquireItem,
     addMissingToAcquire,

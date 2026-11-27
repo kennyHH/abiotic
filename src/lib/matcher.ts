@@ -1,4 +1,5 @@
 import type {
+  Item,
   Recipe,
   RecipeCategory,
   RecipeDatabase,
@@ -53,9 +54,91 @@ export interface RecipeFilterOptions {
   subcategory: 'all' | RecipeSubcategory;
   hideUnsafeSoups: boolean;
   onlyBuffed?: boolean;
+  onlyFavorites?: boolean;
+  favoriteIds?: ReadonlySet<string>;
   featuredDefault?: boolean;
   search: string;
   sortBy: 'best-match' | 'hunger-desc' | 'thirst-desc' | 'level-asc' | 'name-asc';
+}
+
+export interface PantryCatalogEntry {
+  item: Item;
+  distillHint: string;
+  searchText: string;
+  safeUsageCount: number;
+  isSafeRecipeItem: boolean;
+}
+
+const pantryCatalogCache = new WeakMap<RecipeDatabase, PantryCatalogEntry[]>();
+
+/**
+ * Builds and caches the list of usable pantry ingredients for a recipe database.
+ */
+export function getPantryCatalog(db: RecipeDatabase): PantryCatalogEntry[] {
+  const cached = pantryCatalogCache.get(db);
+  if (cached) return cached;
+
+  const usedIds = new Set<string>();
+  const safeIds = new Set<string>();
+  const safeUsageCount = new Map<string, number>();
+
+  for (const r of db.recipes) {
+    const isUnsafe = r.subcategory === 'unsafe-soup';
+    const seenInRecipe = new Set<string>();
+    for (const ing of r.ingredients) {
+      usedIds.add(ing.itemId);
+      if (!isUnsafe) {
+        safeIds.add(ing.itemId);
+        if (!seenInRecipe.has(ing.itemId)) {
+          seenInRecipe.add(ing.itemId);
+          safeUsageCount.set(
+            ing.itemId,
+            (safeUsageCount.get(ing.itemId) ?? 0) + 1
+          );
+        }
+      }
+    }
+  }
+
+  for (const item of Object.values(db.items)) {
+    if ((item.distillsInto?.length ?? 0) > 0) {
+      usedIds.add(item.id);
+      safeIds.add(item.id);
+    }
+  }
+
+  const catalog = [...usedIds]
+    .map((id) => db.items[id])
+    .filter((it): it is Item => Boolean(it))
+    .sort(
+      (a, b) =>
+        (safeUsageCount.get(b.id) ?? 0) - (safeUsageCount.get(a.id) ?? 0) ||
+        a.name.localeCompare(b.name)
+    )
+    .map((item) => {
+      const distillHint =
+        item.distillsInto && item.distillsInto.length > 0
+          ? item.distillsInto
+              .map(
+                (d) =>
+                  `${db.items[d.distillationId]?.name.replace(' Distillation', '') || d.distillationId} x${d.amount}`
+              )
+              .join(', ')
+          : '';
+      const distFullNames = (item.distillsInto || [])
+        .map((d) => db.items[d.distillationId]?.name || '')
+        .join(' ');
+      return {
+        item,
+        distillHint,
+        searchText: `${item.name} ${distFullNames}`.toLowerCase(),
+        safeUsageCount: safeUsageCount.get(item.id) ?? 0,
+        isSafeRecipeItem: safeIds.has(item.id),
+      };
+    });
+
+  pantryCatalogCache.set(db, catalog);
+  return catalog;
 }
 
 const distillersCache = new WeakMap<
@@ -298,6 +381,9 @@ export function filterAndSortMatches(
     ) {
       return false;
     }
+    if (filters.onlyFavorites && !filters.favoriteIds?.has(r.id)) {
+      return false;
+    }
     if (q) {
       const haystacks = [
         r.name,
@@ -359,7 +445,8 @@ export function filterAndSortMatches(
     filters.category === 'all' &&
     !q &&
     filters.workstation === 'all' &&
-    filters.subcategory === 'all'
+    filters.subcategory === 'all' &&
+    !filters.onlyFavorites
   ) {
     return interleaveFeaturedMatches(sorted);
   }

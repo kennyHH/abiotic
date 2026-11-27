@@ -22,6 +22,14 @@ describe('synced recipes.json integrity', () => {
       (i) => (i.distillsInto?.length ?? 0) > 0
     );
     expect(rawDistillers.length).toBeGreaterThan(20);
+
+    for (const distId of db.distillationIds) {
+      expect(db.items[distId], `Missing distillation item ${distId}`).toBeDefined();
+      const hasRawSource = rawDistillers.some((raw) =>
+        raw.distillsInto?.some((y) => y.distillationId === distId)
+      );
+      expect(hasRawSource, `Distillation ${distId} has no raw sources`).toBe(true);
+    }
   });
 
   it('has valid item references for all recipe ingredients', () => {

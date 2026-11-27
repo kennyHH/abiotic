@@ -332,7 +332,7 @@ describe('hardening regression tests', () => {
     expect(screen.queryByText('Crunchy Crystal')).toBeNull();
   }, 15000);
 
-  it('tops up partial stacks when clicking a partial ingredient pill in Quantities mode', () => {
+  it('queues missing deficit to To Acquire when clicking a partial ingredient pill in Quantities mode', () => {
     render(<App />);
     fireEvent.click(screen.getByRole('button', { name: 'Quantities' }));
 
@@ -351,12 +351,15 @@ describe('hardening regression tests', () => {
     fireEvent.change(recipeSearch, { target: { value: 'Crunchy Crystal' } });
 
     const partialPill = screen.getByTitle(
-      'Have 1/3 Honey — click to set to 3'
+      'Have 1/3 Honey — click to add 2 to To Acquire'
     );
     fireEvent.click(partialPill);
 
-    expect(qtyInput.value).toBe('3');
+    expect(qtyInput.value).toBe('1');
     expect(screen.getByText('In Pantry (1)')).toBeTruthy();
+    expect(
+      screen.getByTitle('On To Acquire list (×2) — click to remove')
+    ).toBeTruthy();
   }, 15000);
 
   it('requires confirmation before Clear all when 5 or more items are in Pantry and supports Undo', () => {

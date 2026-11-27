@@ -48,12 +48,19 @@ describe('polish accessibility and domain clarity tests', () => {
     );
     expect(recipeBtn).toBeTruthy();
 
-    // Clicking an ingredient button inside the table toggles it in Pantry
-    const peasBtns = screen.getAllByRole('button', { name: /Canned Peas/i });
-    fireEvent.click(peasBtns[0]);
-    expect(screen.getByText('In Pantry (1)')).toBeTruthy();
+    // Clicking an ingredient button inside the table toggles it in To Acquire (not Pantry)
+    const table = screen.getByRole('table');
+    const peasBtn = within(table).getByRole('button', { name: /Canned Peas/i });
+    fireEvent.click(peasBtn);
+    expect(screen.queryByText('In Pantry (1)')).toBeNull();
+    const sidebar = screen.getByRole('complementary', {
+      name: 'My Inventory and Pantry',
+    });
+    expect(
+      within(sidebar).getByRole('button', { name: /To Acquire/i }).textContent
+    ).toContain('1');
 
-    // Clicking the recipe button (re-queried after table re-grouping) opens the detail drawer
+    // Clicking the recipe button opens the detail drawer
     fireEvent.click(screen.getByRole('button', { name: 'Bland Pea Soup' }));
     expect(await screen.findByRole('dialog', {}, { timeout: 5000 })).toBeTruthy();
   }, 15000);
@@ -64,7 +71,7 @@ describe('polish accessibility and domain clarity tests', () => {
     titleBtn.focus();
     fireEvent.click(titleBtn);
 
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await screen.findByRole('dialog', {}, { timeout: 5000 });
     expect(dialog).toBeTruthy();
 
     fireEvent.keyDown(window, { key: 'Escape' });
@@ -155,7 +162,7 @@ describe('polish accessibility and domain clarity tests', () => {
         hasPantryItems={false}
         quantityMode={false}
         onSelectRecipe={vi.fn()}
-        onTogglePantryItem={vi.fn()}
+        onToggleAcquireItem={vi.fn()}
       />
     );
 
@@ -173,7 +180,7 @@ describe('polish accessibility and domain clarity tests', () => {
     expect(screen.getByText('Portions')).toBeTruthy();
   });
 
-  it('tops up partial ingredient pill to required quantity in Quantities mode instead of deleting the stack', async () => {
+  it('queues missing deficit to To Acquire when clicking a partial ingredient pill in Quantities mode without altering Pantry', async () => {
     window.localStorage.setItem(
       PANTRY_STORAGE_KEY,
       JSON.stringify({
@@ -211,13 +218,28 @@ describe('polish accessibility and domain clarity tests', () => {
         name: /Honey/i,
       });
       expect(updatedHoneyPill.getAttribute('aria-pressed')).toBe('true');
-      expect(within(updatedHoneyPill).getByText('x3')).toBeTruthy();
+      expect(within(updatedHoneyPill).getByText('1/3')).toBeTruthy();
     });
 
     const persisted = JSON.parse(
       window.localStorage.getItem(PANTRY_STORAGE_KEY) || '{}'
-    ) as { pantry?: Record<string, number> };
-    expect(persisted.pantry?.honey).toBe(3);
+    ) as { pantry?: Record<string, number>; acquire?: Record<string, number> };
+    expect(persisted.pantry?.honey).toBe(1);
+    expect(persisted.acquire?.honey).toBe(2);
+
+    // Clicking again removes Honey from To Acquire
+    const activeHoneyPill = within(
+      screen.getByRole('button', { name: 'Crunchy Crystal' }).closest('article')!
+    ).getByRole('button', { name: /Honey/i });
+    fireEvent.click(activeHoneyPill);
+
+    await waitFor(() => {
+      const persistedAfter = JSON.parse(
+        window.localStorage.getItem(PANTRY_STORAGE_KEY) || '{}'
+      ) as { pantry?: Record<string, number>; acquire?: Record<string, number> };
+      expect(persistedAfter.pantry?.honey).toBe(1);
+      expect(persistedAfter.acquire?.honey).toBeUndefined();
+    });
   }, 15000);
 
   it('toggles Unsafe soups between Hidden and Shown and Reset restores Hidden', () => {

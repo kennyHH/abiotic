@@ -30,7 +30,7 @@ Used alongside a live survival game session (second monitor or rapid alt-tabbing
 
 ## Evidence on Hand
 
-- Live-synced dataset at `src/data/recipes.json`: 172 recipes (49 soups, 91 food/baking/Chef's Counter, 32 chemistry concoctions), 18 distillations, and 527 items.
+- Live-synced dataset at `src/data/recipes.json`: 172 recipes (49 soups, 91 food/baking/Chef's Counter, 32 chemistry concoctions), 16 distillations, and 525 items.
 - 525 locally cached PNG icons under `public/images/items/` plus 5 category SVG fallbacks under `public/images/fallbacks/`.
 - No user analytics, community accounts, or external API dependencies at runtime.
 

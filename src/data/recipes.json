@@ -1148,14 +1148,6 @@
       "kind": "output",
       "categoryTag": "lab"
     },
-    "chemistry-part-1": {
-      "id": "chemistry-part-1",
-      "name": "Chemistry Part 1",
-      "image": "images/fallbacks/distillation.svg",
-      "wikiUrl": "https://abioticfactor.wiki.gg/wiki/Chemistry_Part_1",
-      "kind": "distillation",
-      "categoryTag": "distillation"
-    },
     "chieftain-skull": {
       "id": "chieftain-skull",
       "name": "Chieftain Skull",
@@ -3870,14 +3862,6 @@
         }
       ]
     },
-    "samples-recovered-from-gates-dutiful-tr-teams-are-often-composed-of-elements-and-compounds-that-do-not-observe-the-rules-of-modern-chemistry-this-prompts-gate-researchers-to-take-a-more-improvisational-approach-to-discovering-the-properties-of-these-intriguing-substances-chemistry-begins-at-the-distillation-bench-where-you-place-usually-organic-items-into-the-input-flask-left-side-once-an-item-is-in-the-flask-activating-the-bench-begins-the-distilling-process-after-a-short-period-a-distillation-will-be-produced-in-the-output-flask-right-side-the-precise-output-depends-entirely-on-which-items-were-added-and-gate-encourages-experimentation-successful-distillations-will-be-logged-in-the-distillation-section-of-your-gatepal-including-which-distillation-resulted-and-how-many-were-produced-by-a-given-item-once-you-have-a-distillation-in-hand-you-may-use-it-to-produce-a-variety-of-concoctions-at-the-chemistry-bench": {
-      "id": "samples-recovered-from-gates-dutiful-tr-teams-are-often-composed-of-elements-and-compounds-that-do-not-observe-the-rules-of-modern-chemistry-this-prompts-gate-researchers-to-take-a-more-improvisational-approach-to-discovering-the-properties-of-these-intriguing-substances-chemistry-begins-at-the-distillation-bench-where-you-place-usually-organic-items-into-the-input-flask-left-side-once-an-item-is-in-the-flask-activating-the-bench-begins-the-distilling-process-after-a-short-period-a-distillation-will-be-produced-in-the-output-flask-right-side-the-precise-output-depends-entirely-on-which-items-were-added-and-gate-encourages-experimentation-successful-distillations-will-be-logged-in-the-distillation-section-of-your-gatepal-including-which-distillation-resulted-and-how-many-were-produced-by-a-given-item-once-you-have-a-distillation-in-hand-you-may-use-it-to-produce-a-variety-of-concoctions-at-the-chemistry-bench",
-      "name": "Samples recovered from GATE's dutiful TR teams are often composed of elements and compounds that do not observe the rules of modern chemistry. This prompts GATE researchers to take a more improvisational approach to discovering the properties of these intriguing substances. Chemistry begins at the Distillation Bench, where you place - usually - organic items into the Input flask (left side). Once an item is in the flask, activating the bench begins the distilling process. After a short period, a Distillation will be produced in the Output flask (right side). The precise output depends entirely on which items were added, and GATE encourages experimentation. Successful Distillations will be logged in the Distillation section of your GATEPal, including which Distillation resulted, and how many were produced by a given item. Once you have a Distillation in-hand you may use it to produce a variety of Concoctions at the Chemistry Bench.",
-      "image": "images/fallbacks/distillation.svg",
-      "wikiUrl": "https://abioticfactor.wiki.gg/wiki/Samples_recovered_from_GATE's_dutiful_TR_teams_are_often_composed_of_elements_and_compounds_that_do_not_observe_the_rules_of_modern_chemistry._This_prompts_GATE_researchers_to_take_a_more_improvisational_approach_to_discovering_the_properties_of_these_intriguing_substances._Chemistry_begins_at_the_Distillation_Bench%2C_where_you_place_-_usually_-_organic_items_into_the_Input_flask_(left_side)._Once_an_item_is_in_the_flask%2C_activating_the_bench_begins_the_distilling_process._After_a_short_period%2C_a_Distillation_will_be_produced_in_the_Output_flask_(right_side)._The_precise_output_depends_entirely_on_which_items_were_added%2C_and_GATE_encourages_experimentation._Successful_Distillations_will_be_logged_in_the_Distillation_section_of_your_GATEPal%2C_including_which_Distillation_resulted%2C_and_how_many_were_produced_by_a_given_item._Once_you_have_a_Distillation_in-hand_you_may_use_it_to_produce_a_variety_of_Concoctions_at_the_Chemistry_Bench.",
-      "kind": "distillation",
-      "categoryTag": "distillation"
-    },
     "shadowberries": {
       "id": "shadowberries",
       "name": "Shadowberries",
@@ -5060,8 +5044,6 @@
     }
   },
   "distillationIds": [
-    "chemistry-part-1",
-    "samples-recovered-from-gates-dutiful-tr-teams-are-often-composed-of-elements-and-compounds-that-do-not-observe-the-rules-of-modern-chemistry-this-prompts-gate-researchers-to-take-a-more-improvisational-approach-to-discovering-the-properties-of-these-intriguing-substances-chemistry-begins-at-the-distillation-bench-where-you-place-usually-organic-items-into-the-input-flask-left-side-once-an-item-is-in-the-flask-activating-the-bench-begins-the-distilling-process-after-a-short-period-a-distillation-will-be-produced-in-the-output-flask-right-side-the-precise-output-depends-entirely-on-which-items-were-added-and-gate-encourages-experimentation-successful-distillations-will-be-logged-in-the-distillation-section-of-your-gatepal-including-which-distillation-resulted-and-how-many-were-produced-by-a-given-item-once-you-have-a-distillation-in-hand-you-may-use-it-to-produce-a-variety-of-concoctions-at-the-chemistry-bench",
     "vigorous-distillation",
     "fizzy-distillation",
     "alien-distillation",

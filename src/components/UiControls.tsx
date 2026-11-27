@@ -140,6 +140,76 @@ export function ToggleSwitch({
   );
 }
 
+export interface QuantityInputProps {
+  value: number;
+  itemName: string;
+  ariaLabel?: string;
+  onCommit: (nextQty: number) => void;
+}
+
+/**
+ * Buffered numeric quantity input so backspacing to empty doesn't remove the item;
+ * blur or Escape restores/clamps to 1..999.
+ */
+export function QuantityInput({
+  value,
+  itemName,
+  ariaLabel,
+  onCommit,
+}: QuantityInputProps) {
+  const [draft, setDraft] = useState(String(value));
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    if (!editing) {
+      setDraft(String(value));
+    }
+  }, [value, editing]);
+
+  const commitDraft = () => {
+    setEditing(false);
+    const parsed = parseInt(draft.replace(/[^0-9]/g, ''), 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      setDraft('1');
+      onCommit(1);
+      return;
+    }
+    const clamped = Math.min(999, parsed);
+    setDraft(String(clamped));
+    onCommit(clamped);
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      pattern="[0-9]*"
+      value={editing ? draft : String(value)}
+      onFocus={() => {
+        setEditing(true);
+        setDraft(String(value));
+      }}
+      onChange={(e) => {
+        const digitsOnly = e.target.value.replace(/[^0-9]/g, '').slice(0, 3);
+        setDraft(digitsOnly);
+      }}
+      onBlur={commitDraft}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.currentTarget.blur();
+        } else if (e.key === 'Escape') {
+          setEditing(false);
+          setDraft(String(value));
+          e.currentTarget.blur();
+        }
+      }}
+      aria-label={ariaLabel || `Quantity of ${itemName}`}
+      className="tabular-nums no-spinners w-11 rounded border bg-transparent px-1 py-0.5 text-center text-base sm:text-[13px]"
+      style={{ borderColor: 'var(--border-subtle)' }}
+    />
+  );
+}
+
 export interface SelectOption<T extends string> {
   value: T;
   label: string;

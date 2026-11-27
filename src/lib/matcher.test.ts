@@ -393,4 +393,28 @@ describe('matcher engine', () => {
     expect(speedy?.ingredientStatuses[1].status).toBe('owned');
     expect(speedy?.ingredientStatuses[2].status).toBe('owned');
   });
+
+  it('filters to favourited recipes only when onlyFavorites is enabled', () => {
+    const evaluated = evaluateRecipes(mockDb, {
+      pantry: {},
+      quantityMode: false,
+      includeDistillationChain: true,
+    });
+
+    const favs = filterAndSortMatches(evaluated, mockDb, {
+      category: 'all',
+      workstation: 'all',
+      subcategory: 'all',
+      hideUnsafeSoups: true,
+      onlyFavorites: true,
+      favoriteIds: new Set(['chem-speedy-tincture', 'soup-pest-goulash']),
+      search: '',
+      sortBy: 'name-asc',
+    });
+
+    expect(favs.map((m) => m.recipe.id)).toEqual([
+      'soup-pest-goulash',
+      'chem-speedy-tincture',
+    ]);
+  });
 });
